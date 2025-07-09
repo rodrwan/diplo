@@ -1,0 +1,94 @@
+# Diplo - .gitignore para proyecto en C
+
+# Archivos compilados y ejecutables
+bin/
+obj/
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+diplo
+
+# Archivos de base de datos
+*.db
+*.sqlite
+*.sqlite3
+diplo.db
+
+# Archivos temporales de Docker
+/tmp/diplo_*.Dockerfile
+/tmp/diplo_*
+
+# Archivos de sistema
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Archivos de IDE y editores
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# Archivos de log
+*.log
+logs/
+
+# Archivos de backup
+*.bak
+*.backup
+*.old
+
+# Archivos de configuración local
+config/local.h
+.env
+.env.local
+
+# Archivos de testing
+test_results/
+coverage/
+*.gcov
+*.gcda
+*.gcno
+
+# Archivos de profiling
+*.prof
+gmon.out
+
+# Archivos de debug
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Archivos de documentación generada
+docs/generated/
+docs/build/
+
+# Archivos de distribución
+dist/
+build/
+release/
+
+# Archivos de Docker (si se generan)
+Dockerfile.generated
+docker-compose.override.yml
+
+# Archivos de certificados y claves
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Archivos de configuración de red
+hosts
+resolv.conf
