@@ -1,49 +1,36 @@
 package templates
 
 templ DockerEvents() {
-    <!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Diplo - Eventos Docker en Tiempo Real</title>
+    <div class="form-section">
+        <h2>Configuración de Deployment</h2>
+        <div class="form-group">
+            <label for="appName">Nombre de la Aplicación:</label>
+            <input type="text" id="appName" placeholder="mi-aplicacion" value="test-app-web-example">
+        </div>
+        <div class="form-group">
+            <label for="repoUrl">URL del Repositorio:</label>
+            <input type="url" id="repoUrl" placeholder="https://github.com/usuario/repo" value="https://github.com/rodrwan/web-example">
+        </div>
+        <button onclick="startDeployment()" id="deployBtn" class="btn btn-primary">🚀 Iniciar Deployment</button>
+    </div>
+
+    <div class="form-section">
+        <h2>Estado de Conexión</h2>
+        <p>
+            <span class="status-indicator" id="statusIndicator"></span>
+            <span id="statusText">Desconectado</span>
+        </p>
+        <button onclick="connectSSE()" id="connectBtn" class="btn btn-secondary">📡 Conectar SSE</button>
+        <button onclick="disconnectSSE()" id="disconnectBtn" class="btn btn-danger" style="display: none;">❌ Desconectar</button>
+    </div>
+
+    <div class="logs-section" id="logsContainer">
+        <div class="log-entry log-info">
+            <strong>📋 Sistema</strong> - Página cargada. Listo para monitorear eventos Docker.
+        </div>
+    </div>
+
     <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background: #0f0f0f;
-            min-height: 100vh;
-            color: #e0e0e0;
-        }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            background: #1a1a1a;
-            border-radius: 15px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.5);
-            overflow: hidden;
-            border: 1px solid #333;
-        }
-        .header {
-            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
-            color: #ecf0f1;
-            padding: 30px;
-            text-align: center;
-        }
-        .header h1 {
-            margin: 0;
-            font-size: 2.5em;
-            font-weight: 300;
-        }
-        .header p {
-            margin: 10px 0 0 0;
-            opacity: 0.9;
-            font-size: 1.1em;
-        }
-        .content {
-            padding: 30px;
-        }
         .form-section {
             background: #2d2d2d;
             padding: 25px;
@@ -51,49 +38,10 @@ templ DockerEvents() {
             margin-bottom: 30px;
             border: 1px solid #444;
         }
-        .form-group {
+        .form-section h2 {
+            color: #ecf0f1;
             margin-bottom: 20px;
-        }
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-            color: #ecf0f1;
-        }
-        input[type="text"], input[type="url"] {
-            width: 100%;
-            padding: 12px;
-            border: 2px solid #444;
-            border-radius: 8px;
-            font-size: 16px;
-            transition: border-color 0.3s ease;
-            box-sizing: border-box;
-            background: #1a1a1a;
-            color: #e0e0e0;
-        }
-        input[type="text"]:focus, input[type="url"]:focus {
-            outline: none;
-            border-color: #3498db;
-        }
-        button {
-            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
-            color: #ecf0f1;
-            border: none;
-            padding: 15px 30px;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s ease;
-        }
-        button:hover {
-            transform: translateY(-2px);
-            filter: brightness(1.1);
-        }
-        button:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none;
+            font-size: 1.3em;
         }
         .logs-section {
             background: #0f0f0f;
@@ -139,28 +87,6 @@ templ DockerEvents() {
             border-left-color: #9b59b6;
             color: #9b59b6;
         }
-        .status-indicator {
-            display: inline-block;
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            margin-right: 10px;
-        }
-        .status-connecting {
-            background: #f39c12;
-            animation: pulse 1.5s infinite;
-        }
-        .status-connected {
-            background: #27ae60;
-        }
-        .status-disconnected {
-            background: #e74c3c;
-        }
-        @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
-        }
         .event-details {
             margin-top: 10px;
             padding: 10px;
@@ -172,50 +98,7 @@ templ DockerEvents() {
             color: #bdc3c7;
             margin-top: 5px;
         }
-        .timestamp {
-            color: #7f8c8d;
-            font-size: 12px;
-        }
     </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>🚀 Diplo - Eventos Docker</h1>
-            <p>Monitoreo en tiempo real del proceso de deployment</p>
-        </div>
-
-        <div class="content">
-            <div class="form-section">
-                <h2>Configuración de Deployment</h2>
-                <div class="form-group">
-                    <label for="appName">Nombre de la Aplicación:</label>
-                    <input type="text" id="appName" placeholder="mi-aplicacion" value="test-app-web-example">
-                </div>
-                <div class="form-group">
-                    <label for="repoUrl">URL del Repositorio:</label>
-                    <input type="url" id="repoUrl" placeholder="https://github.com/usuario/repo" value="https://github.com/rodrwan/web-example">
-                </div>
-                <button onclick="startDeployment()" id="deployBtn">🚀 Iniciar Deployment</button>
-            </div>
-
-            <div class="form-section">
-                <h2>Estado de Conexión</h2>
-                <p>
-                    <span class="status-indicator" id="statusIndicator"></span>
-                    <span id="statusText">Desconectado</span>
-                </p>
-                <button onclick="connectSSE()" id="connectBtn">📡 Conectar SSE</button>
-                <button onclick="disconnectSSE()" id="disconnectBtn" style="display: none;">❌ Desconectar</button>
-            </div>
-
-            <div class="logs-section" id="logsContainer">
-                <div class="log-entry log-info">
-                    <strong>📋 Sistema</strong> - Página cargada. Listo para monitorear eventos Docker.
-                </div>
-            </div>
-        </div>
-    </div>
 
     <script>
         let eventSource = null;
@@ -361,8 +244,8 @@ templ DockerEvents() {
         }
 
         // Inicializar estado
-        updateStatus('disconnected', 'Desconectado');
+        document.addEventListener('DOMContentLoaded', function() {
+            updateStatus('disconnected', 'Desconectado');
+        });
     </script>
-</body>
-</html>
 }

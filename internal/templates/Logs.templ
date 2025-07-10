@@ -1,0 +1,156 @@
+package templates
+
+templ Logs() {
+    <div class="controls">
+        <input type="text" id="appId" placeholder="ID de la aplicación (ej: app_1234567890_123456)" value="">
+        <button onclick="connectSSE()" id="connectBtn" class="btn btn-primary">Conectar</button>
+        <button onclick="disconnectSSE()" id="disconnectBtn" class="btn btn-secondary" disabled>Desconectar</button>
+        <button onclick="clearLogs()" id="clearBtn" class="btn btn-warning">Limpiar Logs</button>
+    </div>
+
+    <div id="status" class="status disconnected">
+        Estado: Desconectado
+    </div>
+
+    <div class="logs-container" id="logsContainer">
+        <div class="log-entry">
+            <span class="timestamp">[Inicio]</span>
+            <span class="log-info">Esperando conexión...</span>
+        </div>
+    </div>
+
+    <style>
+        .controls {
+            padding: 20px;
+            border-bottom: 1px solid #333;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            background: #2d2d2d;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        .controls input[type="text"] {
+            flex: 1;
+            margin: 0;
+        }
+        .status {
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 8px;
+            font-weight: bold;
+            text-align: center;
+        }
+        .status.connected {
+            background: rgba(39, 174, 96, 0.2);
+            color: #27ae60;
+            border: 1px solid #27ae60;
+        }
+        .status.disconnected {
+            background: rgba(231, 76, 60, 0.2);
+            color: #e74c3c;
+            border: 1px solid #e74c3c;
+        }
+        .status.connecting {
+            background: rgba(243, 156, 18, 0.2);
+            color: #f39c12;
+            border: 1px solid #f39c12;
+        }
+    </style>
+
+    <script>
+        let eventSource = null;
+        let isConnected = false;
+
+        function updateStatus(message, type) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = `Estado: ${message}`;
+            statusEl.className = `status ${type}`;
+        }
+
+        function addLogEntry(message, type = 'info', timestamp = null) {
+            const container = document.getElementById('logsContainer');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+
+            const time = timestamp || new Date().toLocaleTimeString();
+            const logClass = `log-${type}`;
+
+            entry.innerHTML = `
+                <span class="timestamp">[${time}]</span>
+                <span class="${logClass}">${message}</span>
+            `;
+
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function connectSSE() {
+            const appId = document.getElementById('appId').value.trim();
+            if (!appId) {
+                alert('Por favor ingresa un ID de aplicación');
+                return;
+            }
+
+            if (eventSource) {
+                eventSource.close();
+            }
+
+            updateStatus('Conectando...', 'connecting');
+
+            const url = `/api/v1/apps/${appId}/logs`;
+            eventSource = new EventSource(url);
+
+            eventSource.onopen = function(event) {
+                isConnected = true;
+                updateStatus('Conectado', 'connected');
+                document.getElementById('connectBtn').disabled = true;
+                document.getElementById('disconnectBtn').disabled = false;
+                addLogEntry('Conexión SSE establecida', 'success');
+            };
+
+            eventSource.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    addLogEntry(data.message, data.type, new Date(data.timestamp).toLocaleTimeString());
+                } catch (error) {
+                    addLogEntry(`Error parsing message: ${event.data}`, 'error');
+                }
+            };
+
+            eventSource.onerror = function(event) {
+                isConnected = false;
+                updateStatus('Error de conexión', 'disconnected');
+                document.getElementById('connectBtn').disabled = false;
+                document.getElementById('disconnectBtn').disabled = true;
+                addLogEntry('Error en la conexión SSE', 'error');
+                if (eventSource) {
+                    eventSource.close();
+                }
+            };
+        }
+
+        function disconnectSSE() {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+            isConnected = false;
+            updateStatus('Desconectado', 'disconnected');
+            document.getElementById('connectBtn').disabled = false;
+            document.getElementById('disconnectBtn').disabled = true;
+            addLogEntry('Conexión cerrada', 'info');
+        }
+
+        function clearLogs() {
+            const container = document.getElementById('logsContainer');
+            container.innerHTML = '<div class="log-entry"><span class="timestamp">[Inicio]</span> <span class="log-info">Logs limpiados</span></div>';
+        }
+
+        // Ejemplo de uso automático
+        document.addEventListener('DOMContentLoaded', function() {
+            // Simular un ID de aplicación para testing
+            document.getElementById('appId').value = 'app_' + Date.now() + '_' + Math.floor(Math.random() * 1000000);
+        });
+    </script>
+} 

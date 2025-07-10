@@ -8,7 +8,7 @@ package templates
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-func Layout() templ.Component {
+func Layout(title string, currentPage string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -29,7 +29,94 @@ func Layout() templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<!doctype html><html lang=\"es\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><title>Diplo - Logs en Tiempo Real</title><style>\n        body {\n            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;\n            margin: 0;\n            padding: 20px;\n            background-color: #f5f5f5;\n        }\n        .container {\n            max-width: 1200px;\n            margin: 0 auto;\n            background: white;\n            border-radius: 8px;\n            box-shadow: 0 2px 10px rgba(0,0,0,0.1);\n            overflow: hidden;\n        }\n        .header {\n            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);\n            color: white;\n            padding: 20px;\n            text-align: center;\n        }\n        .controls {\n            padding: 20px;\n            border-bottom: 1px solid #eee;\n            display: flex;\n            gap: 10px;\n            align-items: center;\n        }\n        input[type=\"text\"] {\n            padding: 10px;\n            border: 1px solid #ddd;\n            border-radius: 4px;\n            flex: 1;\n        }\n        button {\n            padding: 10px 20px;\n            background: #667eea;\n            color: white;\n            border: none;\n            border-radius: 4px;\n            cursor: pointer;\n            transition: background 0.3s;\n        }\n        button:hover {\n            background: #5a6fd8;\n        }\n        button:disabled {\n            background: #ccc;\n            cursor: not-allowed;\n        }\n        .logs-container {\n            height: 500px;\n            overflow-y: auto;\n            padding: 20px;\n            background: #1e1e1e;\n            color: #f8f8f2;\n            font-family: 'Courier New', monospace;\n            font-size: 14px;\n            line-height: 1.4;\n        }\n        .log-entry {\n            margin-bottom: 5px;\n            padding: 2px 0;\n        }\n        .log-info {\n            color: #87ceeb;\n        }\n        .log-success {\n            color: #90ee90;\n        }\n        .log-error {\n            color: #ff6b6b;\n        }\n        .log-warning {\n            color: #ffd700;\n        }\n        .timestamp {\n            color: #888;\n            font-size: 12px;\n        }\n        .status {\n            padding: 10px;\n            margin: 10px 0;\n            border-radius: 4px;\n            font-weight: bold;\n        }\n        .status.connected {\n            background: #d4edda;\n            color: #155724;\n            border: 1px solid #c3e6cb;\n        }\n        .status.disconnected {\n            background: #f8d7da;\n            color: #721c24;\n            border: 1px solid #f5c6cb;\n        }\n        .status.connecting {\n            background: #fff3cd;\n            color: #856404;\n            border: 1px solid #ffeaa7;\n        }\n    </style></head><body><div class=\"container\"><div class=\"header\"><h1>🚀 Diplo - Logs en Tiempo Real</h1><p>Monitoreo de deployments y logs de contenedores</p></div><div class=\"controls\"><input type=\"text\" id=\"appId\" placeholder=\"ID de la aplicación (ej: app_1234567890_123456)\" value=\"\"> <button onclick=\"connectSSE()\" id=\"connectBtn\">Conectar</button> <button onclick=\"disconnectSSE()\" id=\"disconnectBtn\" disabled>Desconectar</button> <button onclick=\"clearLogs()\" id=\"clearBtn\">Limpiar Logs</button></div><div id=\"status\" class=\"status disconnected\">Estado: Desconectado</div><div class=\"logs-container\" id=\"logsContainer\"><div class=\"log-entry\"><span class=\"timestamp\">[Inicio]</span> <span class=\"log-info\">Esperando conexión...</span></div></div></div><script>\n        let eventSource = null;\n        let isConnected = false;\n\n        function updateStatus(message, type) {\n            const statusEl = document.getElementById('status');\n            statusEl.textContent = `Estado: ${message}`;\n            statusEl.className = `status ${type}`;\n        }\n\n        function addLogEntry(message, type = 'info', timestamp = null) {\n            const container = document.getElementById('logsContainer');\n            const entry = document.createElement('div');\n            entry.className = 'log-entry';\n\n            const time = timestamp || new Date().toLocaleTimeString();\n            const logClass = `log-${type}`;\n\n            entry.innerHTML = `\n                <span class=\"timestamp\">[${time}]</span>\n                <span class=\"${logClass}\">${message}</span>\n            `;\n\n            container.appendChild(entry);\n            container.scrollTop = container.scrollHeight;\n        }\n\n        function connectSSE() {\n            const appId = document.getElementById('appId').value.trim();\n            if (!appId) {\n                alert('Por favor ingresa un ID de aplicación');\n                return;\n            }\n\n            if (eventSource) {\n                eventSource.close();\n            }\n\n            updateStatus('Conectando...', 'connecting');\n\n            const url = `http://localhost:8080/api/v1/apps/${appId}/logs`;\n            eventSource = new EventSource(url);\n\n            eventSource.onopen = function(event) {\n                isConnected = true;\n                updateStatus('Conectado', 'connected');\n                document.getElementById('connectBtn').disabled = true;\n                document.getElementById('disconnectBtn').disabled = false;\n                addLogEntry('Conexión SSE establecida', 'success');\n            };\n\n            eventSource.onmessage = function(event) {\n                try {\n                    const data = JSON.parse(event.data);\n                    addLogEntry(data.message, data.type, new Date(data.timestamp).toLocaleTimeString());\n                } catch (error) {\n                    addLogEntry(`Error parsing message: ${event.data}`, 'error');\n                }\n            };\n\n            eventSource.onerror = function(event) {\n                isConnected = false;\n                updateStatus('Error de conexión', 'disconnected');\n                document.getElementById('connectBtn').disabled = false;\n                document.getElementById('disconnectBtn').disabled = true;\n                addLogEntry('Error en la conexión SSE', 'error');\n                eventSource.close();\n            };\n        }\n\n        function disconnectSSE() {\n            if (eventSource) {\n                eventSource.close();\n                eventSource = null;\n            }\n            isConnected = false;\n            updateStatus('Desconectado', 'disconnected');\n            document.getElementById('connectBtn').disabled = false;\n            document.getElementById('disconnectBtn').disabled = true;\n            addLogEntry('Conexión cerrada', 'info');\n        }\n\n        function clearLogs() {\n            const container = document.getElementById('logsContainer');\n            container.innerHTML = '<div class=\"log-entry\"><span class=\"timestamp\">[Inicio]</span> <span class=\"log-info\">Logs limpiados</span></div>';\n        }\n\n        // Ejemplo de uso automático\n        window.onload = function() {\n            // Simular un ID de aplicación para testing\n            document.getElementById('appId').value = 'app_' + Date.now() + '_' + Math.floor(Math.random() * 1000000);\n        };\n    </script></body></html>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<!doctype html><html lang=\"es\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><title>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var2 string
+		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs(title)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `Layout.templ`, Line: 9, Col: 18}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, " - Diplo</title><style>\n        * {\n            margin: 0;\n            padding: 0;\n            box-sizing: border-box;\n        }\n        body {\n            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;\n            background: #0f0f0f;\n            min-height: 100vh;\n            color: #e0e0e0;\n            line-height: 1.6;\n        }\n        .main-container {\n            max-width: 1400px;\n            margin: 0 auto;\n            padding: 20px;\n        }\n        .header {\n            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);\n            color: #ecf0f1;\n            padding: 30px;\n            text-align: center;\n            border-radius: 15px 15px 0 0;\n            box-shadow: 0 20px 40px rgba(0,0,0,0.5);\n        }\n        .header h1 {\n            font-size: 2.5em;\n            font-weight: 300;\n            margin-bottom: 10px;\n        }\n        .header p {\n            opacity: 0.9;\n            font-size: 1.1em;\n        }\n        .navigation {\n            background: #1a1a1a;\n            border-bottom: 1px solid #333;\n            padding: 0;\n            box-shadow: 0 2px 10px rgba(0,0,0,0.3);\n        }\n        .nav-menu {\n            display: flex;\n            list-style: none;\n            margin: 0;\n            padding: 0;\n        }\n        .nav-item {\n            flex: 1;\n        }\n        .nav-link {\n            display: block;\n            padding: 20px 30px;\n            color: #bdc3c7;\n            text-decoration: none;\n            text-align: center;\n            transition: all 0.3s ease;\n            border-bottom: 3px solid transparent;\n            font-weight: 500;\n        }\n        .nav-link:hover {\n            background: #2d2d2d;\n            color: #ecf0f1;\n            border-bottom-color: #3498db;\n        }\n        .nav-link.active {\n            background: #2d2d2d;\n            color: #3498db;\n            border-bottom-color: #3498db;\n        }\n        .content-area {\n            background: #1a1a1a;\n            border-radius: 0 0 15px 15px;\n            box-shadow: 0 20px 40px rgba(0,0,0,0.5);\n            border: 1px solid #333;\n            border-top: none;\n            min-height: 600px;\n        }\n        .content {\n            padding: 30px;\n        }\n        /* Estilos compartidos para componentes */\n        .btn {\n            padding: 12px 24px;\n            border: none;\n            border-radius: 8px;\n            font-size: 16px;\n            font-weight: 600;\n            cursor: pointer;\n            transition: all 0.2s ease;\n            text-decoration: none;\n            display: inline-flex;\n            align-items: center;\n            gap: 8px;\n        }\n        .btn-primary {\n            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);\n            color: #ecf0f1;\n        }\n        .btn-success {\n            background: linear-gradient(135deg, #27ae60 0%, #229954 100%);\n            color: #ecf0f1;\n        }\n        .btn-warning {\n            background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);\n            color: #2c3e50;\n        }\n        .btn-danger {\n            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);\n            color: #ecf0f1;\n        }\n        .btn-secondary {\n            background: linear-gradient(135deg, #7f8c8d 0%, #6c7b7d 100%);\n            color: #ecf0f1;\n        }\n        .btn:hover {\n            transform: translateY(-2px);\n            box-shadow: 0 4px 15px rgba(0,0,0,0.4);\n            filter: brightness(1.1);\n        }\n        .btn:disabled {\n            opacity: 0.6;\n            cursor: not-allowed;\n            transform: none;\n        }\n        .card {\n            background: #2d2d2d;\n            border: 1px solid #444;\n            border-radius: 10px;\n            padding: 20px;\n            box-shadow: 0 2px 10px rgba(0,0,0,0.3);\n            transition: transform 0.2s ease, box-shadow 0.2s ease;\n        }\n        .card:hover {\n            transform: translateY(-2px);\n            box-shadow: 0 4px 20px rgba(0,0,0,0.5);\n            border-color: #555;\n        }\n        .form-group {\n            margin-bottom: 20px;\n        }\n        label {\n            display: block;\n            margin-bottom: 8px;\n            font-weight: 600;\n            color: #ecf0f1;\n        }\n        input[type=\"text\"], input[type=\"url\"], input[type=\"email\"], select, textarea {\n            width: 100%;\n            padding: 12px;\n            border: 2px solid #444;\n            border-radius: 8px;\n            font-size: 16px;\n            transition: border-color 0.3s ease;\n            background: #1a1a1a;\n            color: #e0e0e0;\n        }\n        input[type=\"text\"]:focus, input[type=\"url\"]:focus, input[type=\"email\"]:focus, select:focus, textarea:focus {\n            outline: none;\n            border-color: #3498db;\n        }\n        .status-indicator {\n            display: inline-block;\n            width: 12px;\n            height: 12px;\n            border-radius: 50%;\n            margin-right: 10px;\n        }\n        .status-connecting {\n            background: #f39c12;\n            animation: pulse 1.5s infinite;\n        }\n        .status-connected {\n            background: #27ae60;\n        }\n        .status-disconnected {\n            background: #e74c3c;\n        }\n        @keyframes pulse {\n            0% { opacity: 1; }\n            50% { opacity: 0.5; }\n            100% { opacity: 1; }\n        }\n        .logs-container {\n            background: #0f0f0f;\n            border-radius: 10px;\n            padding: 20px;\n            height: 500px;\n            overflow-y: auto;\n            font-family: 'Courier New', monospace;\n            font-size: 14px;\n            line-height: 1.5;\n            border: 1px solid #444;\n        }\n        .log-entry {\n            color: #e0e0e0;\n            margin-bottom: 8px;\n            padding: 8px;\n            border-radius: 5px;\n            border-left: 4px solid #444;\n        }\n        .log-info {\n            background: rgba(52, 152, 219, 0.1);\n            border-left-color: #3498db;\n            color: #3498db;\n        }\n        .log-success {\n            background: rgba(39, 174, 96, 0.1);\n            border-left-color: #27ae60;\n            color: #27ae60;\n        }\n        .log-error {\n            background: rgba(231, 76, 60, 0.1);\n            border-left-color: #e74c3c;\n            color: #e74c3c;\n        }\n        .log-warning {\n            background: rgba(243, 156, 18, 0.1);\n            border-left-color: #f39c12;\n            color: #f39c12;\n        }\n        .docker-event {\n            background: rgba(155, 89, 182, 0.1);\n            border-left-color: #9b59b6;\n            color: #9b59b6;\n        }\n        .timestamp {\n            color: #7f8c8d;\n            font-size: 12px;\n        }\n    </style></head><body><div class=\"main-container\"><div class=\"header\"><h1>🚀 Diplo</h1><p>Plataforma de Deployment y Monitoreo</p></div><div class=\"navigation\"><ul class=\"nav-menu\"><li class=\"nav-item\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var3 = []any{templ.KV("nav-link", true), templ.KV("active", currentPage == "apps")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var3...)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<a href=\"/apps\" class=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var4 string
+		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var3).String())
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `Layout.templ`, Line: 1, Col: 0}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "\">📱 Aplicaciones</a></li><li class=\"nav-item\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var5 = []any{templ.KV("nav-link", true), templ.KV("active", currentPage == "deploy")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var5...)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<a href=\"/deploy\" class=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var6 string
+		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var5).String())
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `Layout.templ`, Line: 1, Col: 0}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\">🚀 Deployment</a></li><li class=\"nav-item\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var7 = []any{templ.KV("nav-link", true), templ.KV("active", currentPage == "logs")}
+		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var7...)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<a href=\"/logs\" class=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var8 string
+		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var7).String())
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `Layout.templ`, Line: 1, Col: 0}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\">📋 Logs</a></li></ul></div><div class=\"content-area\"><div class=\"content\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templ_7745c5c3_Var1.Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</div></div></div></body></html>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

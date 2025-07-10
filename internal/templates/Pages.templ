@@ -1,0 +1,19 @@
+package templates
+
+templ AppsPage() {
+    @Layout("Gestor de Aplicaciones", "apps") {
+        @AppsManager()
+    }
+}
+
+templ DeployPage() {
+    @Layout("Deployment", "deploy") {
+        @DockerEvents()
+    }
+}
+
+templ LogsPage() {
+    @Layout("Logs", "logs") {
+        @Logs()
+    }
+} 
