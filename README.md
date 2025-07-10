@@ -45,7 +45,7 @@ Diplo es una plataforma como servicio (PaaS) local escrita en Go que permite des
 ## 🚀 Inicio Rápido
 
 ### Prerrequisitos
-- Go 1.21 o superior
+- Go 1.24 o superior
 - Docker Engine
 - Git
 
