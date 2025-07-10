@@ -36,6 +36,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getAppStmt, err = db.PrepareContext(ctx, GetApp); err != nil {
 		return nil, fmt.Errorf("error preparing query GetApp: %w", err)
 	}
+	if q.getAppByRepoUrlStmt, err = db.PrepareContext(ctx, GetAppByRepoUrl); err != nil {
+		return nil, fmt.Errorf("error preparing query GetAppByRepoUrl: %w", err)
+	}
 	if q.updateAppStmt, err = db.PrepareContext(ctx, UpdateApp); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateApp: %w", err)
 	}
@@ -62,6 +65,11 @@ func (q *Queries) Close() error {
 	if q.getAppStmt != nil {
 		if cerr := q.getAppStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getAppStmt: %w", cerr)
+		}
+	}
+	if q.getAppByRepoUrlStmt != nil {
+		if cerr := q.getAppByRepoUrlStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getAppByRepoUrlStmt: %w", cerr)
 		}
 	}
 	if q.updateAppStmt != nil {
@@ -106,23 +114,25 @@ func (q *Queries) queryRow(ctx context.Context, stmt *sql.Stmt, query string, ar
 }
 
 type Queries struct {
-	db             DBTX
-	tx             *sql.Tx
-	createAppStmt  *sql.Stmt
-	deleteAppStmt  *sql.Stmt
-	getAllAppsStmt *sql.Stmt
-	getAppStmt     *sql.Stmt
-	updateAppStmt  *sql.Stmt
+	db                  DBTX
+	tx                  *sql.Tx
+	createAppStmt       *sql.Stmt
+	deleteAppStmt       *sql.Stmt
+	getAllAppsStmt      *sql.Stmt
+	getAppStmt          *sql.Stmt
+	getAppByRepoUrlStmt *sql.Stmt
+	updateAppStmt       *sql.Stmt
 }
 
 func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 	return &Queries{
-		db:             tx,
-		tx:             tx,
-		createAppStmt:  q.createAppStmt,
-		deleteAppStmt:  q.deleteAppStmt,
-		getAllAppsStmt: q.getAllAppsStmt,
-		getAppStmt:     q.getAppStmt,
-		updateAppStmt:  q.updateAppStmt,
+		db:                  tx,
+		tx:                  tx,
+		createAppStmt:       q.createAppStmt,
+		deleteAppStmt:       q.deleteAppStmt,
+		getAllAppsStmt:      q.getAllAppsStmt,
+		getAppStmt:          q.getAppStmt,
+		getAppByRepoUrlStmt: q.getAppByRepoUrlStmt,
+		updateAppStmt:       q.updateAppStmt,
 	}
 }

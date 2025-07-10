@@ -117,6 +117,29 @@ func (q *Queries) GetApp(ctx context.Context, id string) (App, error) {
 	return i, err
 }
 
+const GetAppByRepoUrl = `-- name: GetAppByRepoUrl :one
+SELECT id, name, repo_url, language, port, container_id, image_id, status, error_msg, created_at, updated_at FROM apps WHERE repo_url = ?
+`
+
+func (q *Queries) GetAppByRepoUrl(ctx context.Context, repoUrl string) (App, error) {
+	row := q.queryRow(ctx, q.getAppByRepoUrlStmt, GetAppByRepoUrl, repoUrl)
+	var i App
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.RepoUrl,
+		&i.Language,
+		&i.Port,
+		&i.ContainerID,
+		&i.ImageID,
+		&i.Status,
+		&i.ErrorMsg,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const UpdateApp = `-- name: UpdateApp :exec
 UPDATE apps SET name = ?, repo_url = ?, language = ?, port = ?, container_id = ?, image_id = ?, status = ?, error_msg = ?, updated_at = ? WHERE id = ?
 `

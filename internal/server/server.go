@@ -25,11 +25,12 @@ import (
 )
 
 type Server struct {
-	router *mux.Router
-	server *http.Server
-	docker *docker.Client
-	apps   map[string]*database.App
-	mu     sync.RWMutex
+	router  *mux.Router
+	server  *http.Server
+	docker  *docker.Client
+	mu      sync.RWMutex
+	db      *sql.DB
+	queries database.Querier
 	// Para SSE - canales de logs por app
 	logChannels map[string]chan string
 	logMu       sync.RWMutex
@@ -47,7 +48,6 @@ func NewServer(host string, port int) *Server {
 			WriteTimeout: 30 * time.Second,
 			IdleTimeout:  120 * time.Second,
 		},
-		apps:        make(map[string]*database.App),
 		logChannels: make(map[string]chan string),
 	}
 
@@ -61,9 +61,8 @@ func NewServer(host string, port int) *Server {
 	if err := queries.CreateTables(context.Background()); err != nil {
 		logrus.Fatalf("error creando tablas: %v", err)
 	}
-	if err := db.Close(); err != nil {
-		logrus.Errorf("error cerrando conexión a la base de datos: %v", err)
-	}
+	srv.db = db
+	srv.queries = queries
 
 	// Inicializar cliente Docker
 	dockerClient, err := docker.NewClient()
@@ -77,11 +76,6 @@ func NewServer(host string, port int) *Server {
 		// Solo registrar eventos globales en logs, no enviar a todas las apps
 		logrus.Debugf("Evento Docker global: %s - %s", event.Type, event.Message)
 	})
-
-	// Cargar aplicaciones existentes
-	if err := srv.loadApps(queries); err != nil {
-		logrus.Warnf("Error cargando aplicaciones: %v", err)
-	}
 
 	// Configurar rutas
 	srv.setupRoutes()
@@ -104,34 +98,16 @@ func (s *Server) setupRoutes() {
 
 	// API routes
 	api := s.router.PathPrefix("/api/v1").Subrouter()
-	api.HandleFunc("/deploy", ConnectToDatabase(s.deployHandler)).Methods("POST")
+	api.HandleFunc("/deploy", s.deployHandler).Methods("POST")
 	api.HandleFunc("/apps", s.listAppsHandler).Methods("GET")
 	api.HandleFunc("/apps/{id}", s.getAppHandler).Methods("GET")
-	api.HandleFunc("/apps/{id}", ConnectToDatabase(s.deleteAppHandler)).Methods("DELETE")
+	api.HandleFunc("/apps/{id}", s.deleteAppHandler).Methods("DELETE")
 
 	// Maintenance endpoints
 	api.HandleFunc("/maintenance/prune-images", s.pruneImagesHandler).Methods("POST")
 
 	// SSE endpoint para logs en tiempo real
 	api.HandleFunc("/apps/{id}/logs", s.logsSSEHandler).Methods("GET")
-}
-
-type HandlerFunc func(queries *database.Queries) http.HandlerFunc
-
-func ConnectToDatabase(handler HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		db, err := sql.Open("sqlite3", "diplo.db")
-		if err != nil {
-			logrus.Fatalf("error abriendo base de datos: %v", err)
-		}
-		queries := database.New(db)
-
-		handler(queries).ServeHTTP(w, r)
-
-		if err := db.Close(); err != nil {
-			logrus.Errorf("error cerrando conexión a la base de datos: %v", err)
-		}
-	}
 }
 
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
@@ -175,80 +151,115 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-func (s *Server) deployHandler(queries *database.Queries) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req models.DeployRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
-			return
+func (s *Server) deployHandler(w http.ResponseWriter, r *http.Request) {
+	var req models.DeployRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if req.RepoURL == "" {
+		http.Error(w, "repo_url is required", http.StatusBadRequest)
+		return
+	}
+
+	// Verificar si ya existe una aplicación con este repo_url
+	existingApp, err := s.queries.GetAppByRepoUrl(r.Context(), req.RepoURL)
+	if err != nil && err != sql.ErrNoRows {
+		logrus.Errorf("Error verificando aplicación existente: %v", err)
+		http.Error(w, "Error verificando aplicación existente", http.StatusInternalServerError)
+		return
+	}
+
+	// Si existe una app con el mismo repo_url, hacer redeploy
+	if err != sql.ErrNoRows {
+		logrus.Infof("App existente encontrada para %s, haciendo redeploy: %s", req.RepoURL, existingApp.ID)
+
+		// Actualizar nombre si se proporcionó uno nuevo
+		if req.Name != "" && req.Name != existingApp.Name {
+			existingApp.Name = req.Name
 		}
 
-		if req.RepoURL == "" {
-			http.Error(w, "repo_url is required", http.StatusBadRequest)
-			return
-		}
-
-		// Crear nueva aplicación
-		app := &database.App{
-			ID:      database.GenerateAppID(),
-			Name:    req.Name,
-			RepoUrl: req.RepoURL,
-		}
-
-		// Asignar puerto libre
-		port, err := findFreePort()
-		if err != nil {
-			logrus.Errorf("Error asignando puerto: %v", err)
-			http.Error(w, "No se pudo asignar puerto libre", http.StatusInternalServerError)
-			return
-		}
-		app.Port = int64(port)
-
-		// Guardar en base de datos
-		if err := queries.CreateApp(r.Context(), database.CreateAppParams{
-			ID:       app.ID,
-			Name:     app.Name,
-			RepoUrl:  req.RepoURL,
-			Language: sql.NullString{String: "Go", Valid: true},
-			Port:     int64(port),
-		}); err != nil {
-			logrus.Errorf("Error guardando aplicación: %v", err)
-			http.Error(w, "Error guardando aplicación", http.StatusInternalServerError)
-			return
-		}
-
-		// Agregar a memoria
-		s.mu.Lock()
-		s.apps[app.ID] = app
-		s.mu.Unlock()
-
-		// Iniciar deployment en background
-		go s.deployApp(queries, app)
+		// Iniciar redeploy en background
+		go s.redeployExistingApp(s.queries, &existingApp)
 
 		// Responder inmediatamente
 		response := map[string]any{
-			"id":       app.ID,
-			"name":     app.Name,
-			"repo_url": app.RepoUrl,
-			"port":     app.Port,
-			"url":      fmt.Sprintf("http://localhost:%d", app.Port),
-			"status":   "deploying",
-			"message":  "Aplicación creada y deployment iniciado",
+			"id":       existingApp.ID,
+			"name":     existingApp.Name,
+			"repo_url": existingApp.RepoUrl,
+			"port":     existingApp.Port,
+			"url":      fmt.Sprintf("http://localhost:%d", existingApp.Port),
+			"status":   "redeploying",
+			"message":  "Redeploy iniciado para aplicación existente",
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
+		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(response)
+		return
 	}
+
+	// Si no existe, crear nueva aplicación
+	app := &database.App{
+		ID:      database.GenerateAppID(),
+		Name:    req.Name,
+		RepoUrl: req.RepoURL,
+	}
+
+	// Asignar puerto libre
+	port, err := findFreePort()
+	if err != nil {
+		logrus.Errorf("Error asignando puerto: %v", err)
+		http.Error(w, "No se pudo asignar puerto libre", http.StatusInternalServerError)
+		return
+	}
+	app.Port = int64(port)
+
+	// Guardar en base de datos
+	if err := s.queries.CreateApp(r.Context(), database.CreateAppParams{
+		ID:       app.ID,
+		Name:     app.Name,
+		RepoUrl:  req.RepoURL,
+		Language: sql.NullString{String: "Go", Valid: true},
+		Port:     int64(port),
+		Status:   database.StatusDeploying,
+	}); err != nil {
+		logrus.Errorf("Error guardando aplicación: %v", err)
+		http.Error(w, "Error guardando aplicación", http.StatusInternalServerError)
+		return
+	}
+
+	// Iniciar deployment en background
+	go s.deployApp(s.queries, app)
+
+	// Responder inmediatamente
+	response := map[string]any{
+		"id":       app.ID,
+		"name":     app.Name,
+		"repo_url": app.RepoUrl,
+		"port":     app.Port,
+		"url":      fmt.Sprintf("http://localhost:%d", app.Port),
+		"status":   "deploying",
+		"message":  "Aplicación creada y deployment iniciado",
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(response)
 }
 
 func (s *Server) listAppsHandler(w http.ResponseWriter, r *http.Request) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	apps, err := s.queries.GetAllApps(r.Context())
+	if err != nil {
+		logrus.Errorf("Error obteniendo aplicaciones: %v", err)
+		http.Error(w, "Error obteniendo aplicaciones", http.StatusInternalServerError)
+		return
+	}
 
-	apps := make([]*dto.App, 0, len(s.apps))
-	for _, app := range s.apps {
-		apps = append(apps, &dto.App{
+	appsDTO := make([]*dto.App, 0, len(apps))
+	for _, app := range apps {
+		appsDTO = append(appsDTO, &dto.App{
 			ID:          app.ID,
 			Name:        app.Name,
 			RepoUrl:     app.RepoUrl,
@@ -262,19 +273,17 @@ func (s *Server) listAppsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(apps)
+	json.NewEncoder(w).Encode(appsDTO)
 }
 
 func (s *Server) getAppHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	appID := vars["id"]
 
-	s.mu.RLock()
-	app, exists := s.apps[appID]
-	s.mu.RUnlock()
-
-	if !exists {
-		http.Error(w, "Aplicación no encontrada", http.StatusNotFound)
+	app, err := s.queries.GetApp(r.Context(), appID)
+	if err != nil {
+		logrus.Errorf("Error obteniendo aplicación: %v", err)
+		http.Error(w, "Error obteniendo aplicación", http.StatusInternalServerError)
 		return
 	}
 
@@ -282,50 +291,43 @@ func (s *Server) getAppHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(app)
 }
 
-func (s *Server) deleteAppHandler(queries *database.Queries) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		appID := vars["id"]
+func (s *Server) deleteAppHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	appID := vars["id"]
 
-		s.mu.Lock()
-		app, exists := s.apps[appID]
-		if exists {
-			delete(s.apps, appID)
-		}
-		s.mu.Unlock()
-
-		if !exists {
-			http.Error(w, "Aplicación no encontrada", http.StatusNotFound)
-			return
-		}
-
-		// Detener y eliminar contenedor si existe
-		if app.ContainerID.String != "" {
-			if err := s.docker.StopContainer(app.ContainerID.String); err != nil {
-				logrus.Warnf("Error deteniendo contenedor %s: %v", app.ContainerID.String, err)
-			}
-		}
-
-		// Eliminar de base de datos
-		if err := queries.DeleteApp(r.Context(), appID); err != nil {
-			logrus.Errorf("Error eliminando aplicación: %v", err)
-		}
-
-		response := map[string]interface{}{
-			"message": "Aplicación eliminada exitosamente",
-			"id":      appID,
-		}
-
-		// Limpiar imágenes dangling después de eliminar la app
-		go func() {
-			if err := s.docker.PruneDanglingImages(); err != nil {
-				logrus.Warnf("Error limpiando imágenes dangling después de eliminar app: %v", err)
-			}
-		}()
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+	app, err := s.queries.GetApp(r.Context(), appID)
+	if err != nil {
+		logrus.Errorf("Error obteniendo aplicación: %v", err)
+		http.Error(w, "Error obteniendo aplicación", http.StatusInternalServerError)
+		return
 	}
+
+	// Detener y eliminar contenedor si existe
+	if app.ContainerID.String != "" {
+		if err := s.docker.StopContainer(app.ContainerID.String); err != nil {
+			logrus.Warnf("Error deteniendo contenedor %s: %v", app.ContainerID.String, err)
+		}
+	}
+
+	// Eliminar de base de datos
+	if err := s.queries.DeleteApp(r.Context(), appID); err != nil {
+		logrus.Errorf("Error eliminando aplicación: %v", err)
+	}
+
+	response := map[string]interface{}{
+		"message": "Aplicación eliminada exitosamente",
+		"id":      appID,
+	}
+
+	// Limpiar imágenes dangling después de eliminar la app
+	go func() {
+		if err := s.docker.PruneDanglingImages(); err != nil {
+			logrus.Warnf("Error limpiando imágenes dangling después de eliminar app: %v", err)
+		}
+	}()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }
 
 func (s *Server) pruneImagesHandler(w http.ResponseWriter, r *http.Request) {
@@ -354,7 +356,7 @@ func (s *Server) pruneImagesHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-func (s *Server) deployApp(queries *database.Queries, app *database.App) {
+func (s *Server) deployApp(queries database.Querier, app *database.App) {
 	logrus.Infof("Iniciando deployment de: %s (%s)", app.Name, app.ID)
 
 	// Configurar callback específico para esta aplicación
@@ -369,13 +371,14 @@ func (s *Server) deployApp(queries *database.Queries, app *database.App) {
 	s.sendLogMessage(app.ID, "info", "Iniciando deployment...")
 
 	// Actualizar estado
-	app.Status = sql.NullString{String: "deploying", Valid: true}
+	app.Status = database.StatusDeploying
 	queries.UpdateApp(context.Background(), database.UpdateAppParams{
 		ID:       app.ID,
 		Name:     app.Name,
 		RepoUrl:  app.RepoUrl,
 		Language: sql.NullString{String: "Go", Valid: true},
 		Port:     app.Port,
+		Status:   app.Status,
 	})
 
 	// Detectar lenguaje
@@ -391,6 +394,8 @@ func (s *Server) deployApp(queries *database.Queries, app *database.App) {
 			RepoUrl:  app.RepoUrl,
 			Language: sql.NullString{String: "Go", Valid: true},
 			Port:     app.Port,
+			Status:   app.Status,
+			ErrorMsg: app.ErrorMsg,
 		})
 		s.sendLogMessage(app.ID, "error", fmt.Sprintf("Error detectando lenguaje: %v", err))
 		return
@@ -412,6 +417,8 @@ func (s *Server) deployApp(queries *database.Queries, app *database.App) {
 			RepoUrl:  app.RepoUrl,
 			Language: app.Language,
 			Port:     app.Port,
+			Status:   app.Status,
+			ErrorMsg: app.ErrorMsg,
 		})
 		s.sendLogMessage(app.ID, "error", fmt.Sprintf("Error generando Dockerfile: %v", err))
 		return
@@ -433,6 +440,8 @@ func (s *Server) deployApp(queries *database.Queries, app *database.App) {
 			RepoUrl:  app.RepoUrl,
 			Language: app.Language,
 			Port:     app.Port,
+			Status:   app.Status,
+			ErrorMsg: app.ErrorMsg,
 		})
 		s.sendLogMessage(app.ID, "error", fmt.Sprintf("Error generando tag de imagen: %v", err))
 		return
@@ -455,6 +464,8 @@ func (s *Server) deployApp(queries *database.Queries, app *database.App) {
 			RepoUrl:  app.RepoUrl,
 			Language: app.Language,
 			Port:     app.Port,
+			Status:   app.Status,
+			ErrorMsg: app.ErrorMsg,
 		})
 		s.sendLogMessage(app.ID, "error", fmt.Sprintf("Error construyendo imagen Docker: %v", err))
 
@@ -484,6 +495,8 @@ func (s *Server) deployApp(queries *database.Queries, app *database.App) {
 			RepoUrl:  app.RepoUrl,
 			Language: app.Language,
 			Port:     app.Port,
+			Status:   app.Status,
+			ErrorMsg: app.ErrorMsg,
 		})
 		s.sendLogMessage(app.ID, "error", fmt.Sprintf("Error ejecutando contenedor: %v", err))
 		return
@@ -496,13 +509,20 @@ func (s *Server) deployApp(queries *database.Queries, app *database.App) {
 	app.UpdatedAt = sql.NullTime{Time: time.Now(), Valid: true}
 	app.ErrorMsg = sql.NullString{String: "", Valid: true}
 
-	queries.UpdateApp(context.Background(), database.UpdateAppParams{
-		ID:       app.ID,
-		Name:     app.Name,
-		RepoUrl:  app.RepoUrl,
-		Language: app.Language,
-		Port:     app.Port,
-	})
+	if err := queries.UpdateApp(context.Background(), database.UpdateAppParams{
+		ID:          app.ID,
+		Name:        app.Name,
+		RepoUrl:     app.RepoUrl,
+		Language:    app.Language,
+		Port:        app.Port,
+		Status:      app.Status,
+		ErrorMsg:    app.ErrorMsg,
+		ContainerID: app.ContainerID,
+		ImageID:     app.ImageID,
+		UpdatedAt:   app.UpdatedAt,
+	}); err != nil {
+		logrus.Errorf("Error actualizando aplicación: %v", err)
+	}
 
 	// Limpiar imágenes antiguas (mantener solo las 3 más recientes)
 	go func() {
@@ -521,21 +541,165 @@ func (s *Server) deployApp(queries *database.Queries, app *database.App) {
 	s.sendLogMessage(app.ID, "success", fmt.Sprintf("Aplicación disponible en: http://localhost:%d", app.Port))
 }
 
-func (s *Server) loadApps(queries *database.Queries) error {
-	apps, err := queries.GetAllApps(context.Background())
+func (s *Server) redeployExistingApp(queries database.Querier, app *database.App) {
+	logrus.Infof("Iniciando redeploy de aplicación existente: %s (%s)", app.Name, app.ID)
+
+	// Configurar callback específico para esta aplicación
+	originalCallback := s.docker.GetEventCallback()
+	s.docker.SetEventCallback(func(event docker.DockerEvent) {
+		s.sendDockerEventToApp(app.ID, event)
+	})
+	defer s.docker.SetEventCallback(originalCallback)
+
+	// Enviar log inicial
+	s.sendLogMessage(app.ID, "info", "Iniciando redeploy de aplicación existente...")
+
+	// Actualizar estado a redeploying
+	app.Status = database.StatusRedeploying
+	app.ErrorMsg = sql.NullString{String: "", Valid: true}
+	if err := queries.UpdateApp(context.Background(), database.UpdateAppParams{
+		ID:          app.ID,
+		Name:        app.Name,
+		RepoUrl:     app.RepoUrl,
+		Language:    app.Language,
+		Port:        app.Port,
+		Status:      app.Status,
+		ErrorMsg:    app.ErrorMsg,
+		ContainerID: app.ContainerID,
+		ImageID:     app.ImageID,
+		UpdatedAt:   app.UpdatedAt,
+	}); err != nil {
+		logrus.Errorf("Error actualizando estado de redeploy: %v", err)
+	}
+
+	// Parar contenedor anterior si existe
+	if app.ContainerID.String != "" {
+		s.sendLogMessage(app.ID, "info", "Deteniendo contenedor anterior...")
+		if err := s.docker.StopContainer(app.ContainerID.String); err != nil {
+			logrus.Warnf("Error deteniendo contenedor anterior %s: %v", app.ContainerID.String, err)
+			s.sendLogMessage(app.ID, "warning", fmt.Sprintf("Error deteniendo contenedor anterior: %v", err))
+		} else {
+			s.sendLogMessage(app.ID, "info", "Contenedor anterior detenido exitosamente")
+		}
+		// Limpiar container ID
+		app.ContainerID = sql.NullString{String: "", Valid: true}
+	}
+
+	// Detectar lenguaje
+	s.sendLogMessage(app.ID, "info", "Detectando lenguaje...")
+	language, err := detectLanguage(app.RepoUrl)
 	if err != nil {
-		return err
+		logrus.Errorf("Error detectando lenguaje en redeploy: %v", err)
+		s.handleRedeployError(queries, app, fmt.Sprintf("Error detectando lenguaje: %v", err))
+		return
+	}
+	app.Language = sql.NullString{String: language, Valid: true}
+	s.sendLogMessage(app.ID, "info", fmt.Sprintf("Lenguaje detectado: %s", language))
+
+	// Generar Dockerfile
+	s.sendLogMessage(app.ID, "info", "Generando Dockerfile...")
+	dockerfile, err := generateDockerfile(app.RepoUrl, strconv.Itoa(int(app.Port)), language)
+	if err != nil {
+		logrus.Errorf("Error generando Dockerfile en redeploy: %v", err)
+		s.handleRedeployError(queries, app, fmt.Sprintf("Error generando Dockerfile: %v", err))
+		return
+	}
+	s.sendLogMessage(app.ID, "info", "Dockerfile generado exitosamente")
+
+	// Generar nuevo tag único basado en el hash del commit actual
+	s.sendLogMessage(app.ID, "info", "Obteniendo hash del último commit...")
+	imageTag, err := s.docker.GenerateImageTag(app.ID, app.RepoUrl)
+	if err != nil {
+		logrus.Errorf("Error generando tag de imagen en redeploy: %v", err)
+		s.handleRedeployError(queries, app, fmt.Sprintf("Error generando tag de imagen: %v", err))
+		return
+	}
+	s.sendLogMessage(app.ID, "info", fmt.Sprintf("Nuevo tag de imagen generado: %s", imageTag))
+
+	// Construir nueva imagen
+	s.sendLogMessage(app.ID, "info", fmt.Sprintf("Construyendo nueva imagen: %s", imageTag))
+	imageID, err := s.docker.BuildImage(imageTag, dockerfile)
+	if err != nil {
+		logrus.Errorf("Error construyendo imagen en redeploy: %v", err)
+		s.handleRedeployError(queries, app, fmt.Sprintf("Error construyendo imagen Docker: %v", err))
+
+		// Limpiar imágenes dangling después de build fallido
+		go func() {
+			if err := s.docker.PruneDanglingImages(); err != nil {
+				logrus.Warnf("Error limpiando imágenes dangling después de build fallido: %v", err)
+			}
+		}()
+		return
+	}
+	s.sendLogMessage(app.ID, "success", "Nueva imagen construida exitosamente")
+
+	// Ejecutar nuevo contenedor
+	s.sendLogMessage(app.ID, "info", fmt.Sprintf("Ejecutando nuevo contenedor en puerto %d", app.Port))
+	containerID, err := s.docker.RunContainer(app, imageTag)
+	if err != nil {
+		logrus.Errorf("Error ejecutando contenedor en redeploy: %v", err)
+		s.handleRedeployError(queries, app, fmt.Sprintf("Error ejecutando contenedor: %v", err))
+		return
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	// Actualizar aplicación con nueva información
+	app.Status = database.StatusRunning
+	app.ContainerID = sql.NullString{String: containerID, Valid: true}
+	app.ImageID = sql.NullString{String: imageID, Valid: true}
+	app.UpdatedAt = sql.NullTime{Time: time.Now(), Valid: true}
+	app.ErrorMsg = sql.NullString{String: "", Valid: true}
 
-	for _, app := range apps {
-		s.apps[app.ID] = &app
+	if err := queries.UpdateApp(context.Background(), database.UpdateAppParams{
+		ID:          app.ID,
+		Name:        app.Name,
+		RepoUrl:     app.RepoUrl,
+		Language:    app.Language,
+		Port:        app.Port,
+		Status:      app.Status,
+		ErrorMsg:    app.ErrorMsg,
+		ContainerID: app.ContainerID,
+		ImageID:     app.ImageID,
+		UpdatedAt:   app.UpdatedAt,
+	}); err != nil {
+		logrus.Errorf("Error actualizando aplicación después del redeploy: %v", err)
 	}
 
-	logrus.Infof("Cargadas %d aplicaciones desde la base de datos", len(apps))
-	return nil
+	// Limpiar imágenes antiguas (mantener solo las 3 más recientes)
+	go func() {
+		if err := s.docker.CleanupOldImages(app.ID, 3); err != nil {
+			logrus.Warnf("Error limpiando imágenes antiguas después del redeploy: %v", err)
+		}
+
+		// Limpiar imágenes dangling después del cleanup
+		if err := s.docker.PruneDanglingImages(); err != nil {
+			logrus.Warnf("Error limpiando imágenes dangling después del redeploy: %v", err)
+		}
+	}()
+
+	logrus.Infof("Redeploy completado exitosamente: %s en puerto %d", app.ID, app.Port)
+	s.sendLogMessage(app.ID, "success", fmt.Sprintf("Redeploy completado exitosamente en puerto %d", app.Port))
+	s.sendLogMessage(app.ID, "success", fmt.Sprintf("Aplicación actualizada disponible en: http://localhost:%d", app.Port))
+}
+
+// handleRedeployError maneja errores durante el redeploy
+func (s *Server) handleRedeployError(queries database.Querier, app *database.App, errorMsg string) {
+	app.Status = database.StatusError
+	app.ErrorMsg = sql.NullString{String: errorMsg, Valid: true}
+	if err := queries.UpdateApp(context.Background(), database.UpdateAppParams{
+		ID:          app.ID,
+		Name:        app.Name,
+		RepoUrl:     app.RepoUrl,
+		Language:    app.Language,
+		Port:        app.Port,
+		Status:      app.Status,
+		ErrorMsg:    app.ErrorMsg,
+		ContainerID: app.ContainerID,
+		ImageID:     app.ImageID,
+		UpdatedAt:   app.UpdatedAt,
+	}); err != nil {
+		logrus.Errorf("Error actualizando aplicación con error de redeploy: %v", err)
+	}
+	s.sendLogMessage(app.ID, "error", errorMsg)
 }
 
 // logsSSEHandler maneja las conexiones SSE para logs en tiempo real
@@ -543,13 +707,10 @@ func (s *Server) logsSSEHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	appID := vars["id"]
 
-	// Verificar que la aplicación existe
-	s.mu.RLock()
-	app, exists := s.apps[appID]
-	s.mu.RUnlock()
-
-	if !exists {
-		http.Error(w, "Aplicación no encontrada", http.StatusNotFound)
+	app, err := s.queries.GetApp(r.Context(), appID)
+	if err != nil {
+		logrus.Errorf("Error obteniendo aplicación: %v", err)
+		http.Error(w, "Error obteniendo aplicación", http.StatusInternalServerError)
 		return
 	}
 
@@ -688,6 +849,10 @@ func (s *Server) Start() error {
 func (s *Server) Shutdown(ctx context.Context) error {
 	if err := s.docker.Close(); err != nil {
 		logrus.Errorf("Error cerrando conexión a Docker: %v", err)
+	}
+
+	if err := s.db.Close(); err != nil {
+		logrus.Errorf("Error cerrando base de datos: %v", err)
 	}
 
 	return s.server.Shutdown(ctx)

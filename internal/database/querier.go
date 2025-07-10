@@ -13,6 +13,7 @@ type Querier interface {
 	DeleteApp(ctx context.Context, id string) error
 	GetAllApps(ctx context.Context) ([]App, error)
 	GetApp(ctx context.Context, id string) (App, error)
+	GetAppByRepoUrl(ctx context.Context, repoUrl string) (App, error)
 	UpdateApp(ctx context.Context, arg UpdateAppParams) error
 }
 

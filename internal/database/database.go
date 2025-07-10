@@ -15,10 +15,11 @@ import (
 var createAppsTable string
 
 var (
-	StatusIdle      = sql.NullString{String: "idle", Valid: true}
-	StatusDeploying = sql.NullString{String: "deploying", Valid: true}
-	StatusRunning   = sql.NullString{String: "running", Valid: true}
-	StatusError     = sql.NullString{String: "error", Valid: true}
+	StatusIdle        = sql.NullString{String: "idle", Valid: true}
+	StatusDeploying   = sql.NullString{String: "deploying", Valid: true}
+	StatusRedeploying = sql.NullString{String: "redeploying", Valid: true}
+	StatusRunning     = sql.NullString{String: "running", Valid: true}
+	StatusError       = sql.NullString{String: "error", Valid: true}
 )
 
 func GenerateAppID() string {
