@@ -1,202 +1,190 @@
 # Diplo - PaaS Local en Go
 
-Diplo es una plataforma como servicio (PaaS) local escrita en Go que permite desplegar aplicaciones desde repositorios Git usando contenedores Docker.
+> 🚀 **Plataforma de deployment automático** desde repositorios Git usando Docker con interfaz web intuitiva y monitoreo en tiempo real
 
-## Características
+Diplo es una plataforma como servicio (PaaS) local escrita en Go que permite desplegar aplicaciones desde repositorios Git usando contenedores Docker, con una interfaz web moderna para gestión y monitoreo.
 
-- 🚀 **Deployment automático** desde repositorios Git
-- 🐳 **Integración nativa con Docker** usando la API oficial
-- 📊 **Base de datos SQLite** para persistencia
-- 🔄 **Shutdown graceful** con manejo de señales
-- 🌐 **API REST** con soporte CORS
-- 📝 **Logging estructurado** con logrus
-- 🎯 **Detección automática de lenguajes** (Go, Node.js, Python)
+## ✨ Características Principales
 
-## Requisitos
+### 🌐 **Interfaz Web Unificada**
+- Dashboard moderno con tema oscuro
+- Navegación intuitiva entre Apps, Deployment y Logs
+- Gestión visual de aplicaciones desplegadas
+- Monitoreo en tiempo real con Server-Sent Events (SSE)
 
+### 🚀 **Deployment Automático**
+- Deployment desde repositorios Git con un clic
+- Detección automática de lenguajes (Go, Node.js, Python)
+- Generación automática de Dockerfiles
+- Asignación automática de puertos
+
+### 📊 **Monitoreo y Gestión**
+- Logs en tiempo real de aplicaciones
+- Estados de deployment visibles
+- Métricas de aplicaciones (ejecutándose, deployando, errores)
+- Acciones rápidas (redeploy, eliminar, abrir app)
+
+### 🔧 **Arquitectura Robusta**
+- API REST completa con soporte CORS
+- Base de datos SQLite para persistencia
+- Integración nativa con Docker API
+- Shutdown graceful con manejo de señales
+- Logging estructurado con logrus
+
+## 🖥️ Capturas de Pantalla
+
+### Dashboard Principal
+![Dashboard de Aplicaciones](docs/screenshots/dashboard.png)
+
+### Proceso de Deployment
+![Deployment en Tiempo Real](docs/screenshots/deployment.png)
+
+### Monitoreo de Logs
+![Logs en Tiempo Real](docs/screenshots/logs.png)
+
+## 🚀 Inicio Rápido
+
+### Prerrequisitos
 - Go 1.21 o superior
 - Docker Engine
 - Git
 
-## Instalación
-
-### Desde el código fuente
-
+### Instalación
 ```bash
 # Clonar el repositorio
 git clone https://github.com/rodrwan/diplo.git
 cd diplo
 
-# Instalar dependencias
-make deps
-
-# Compilar
+# Instalar dependencias y compilar
 make build
 
 # Ejecutar
 make run
 ```
 
-### Desarrollo
-
+### Acceso a la Interfaz Web
 ```bash
-# Ejecutar en modo desarrollo
-make dev
+# Abrir en tu navegador
+http://localhost:8080
 ```
 
-## Uso
+## 🌟 Uso
 
-### API Endpoints
+### Via Interfaz Web
+1. **Accede a** `http://localhost:8080`
+2. **Navega a "Deployment"** para desplegar una nueva app
+3. **Ingresa el repositorio Git** y nombre de la aplicación
+4. **Monitorea en tiempo real** el proceso de deployment
+5. **Gestiona tus apps** desde la sección "Aplicaciones"
 
-#### Health Check
+### Via API REST
 ```bash
-curl http://localhost:8080/
-```
-
-#### Deploy Application
-```bash
+# Desplegar aplicación
 curl -X POST http://localhost:8080/api/v1/deploy \
   -H "Content-Type: application/json" \
   -d '{
     "repo_url": "https://github.com/user/my-app.git",
     "name": "my-app"
   }'
-```
 
-#### List Applications
-```bash
+# Listar aplicaciones
 curl http://localhost:8080/api/v1/apps
+
+# Logs en tiempo real (SSE)
+curl http://localhost:8080/api/v1/apps/{app-id}/logs
 ```
 
-#### Get Application
-```bash
-curl http://localhost:8080/api/v1/apps/{app-id}
-```
-
-#### Delete Application
-```bash
-curl -X DELETE http://localhost:8080/api/v1/apps/{app-id}
-```
-
-### Ejemplo de uso
-
-1. **Desplegar una aplicación Go:**
-```bash
-curl -X POST http://localhost:8080/api/v1/deploy \
-  -H "Content-Type: application/json" \
-  -d '{
-    "repo_url": "https://github.com/rodrwan/simple-go-app.git"
-  }'
-```
-
-2. **Verificar el estado:**
-```bash
-curl http://localhost:8080/api/v1/apps
-```
-
-3. **Acceder a la aplicación:**
-```bash
-# La aplicación estará disponible en http://localhost:{puerto-asignado}
-```
-
-## Estructura del Proyecto
+## 📁 Estructura del Proyecto
 
 ```
 diplo/
-├── cmd/diplo/          # Punto de entrada de la aplicación
+├── cmd/diplo/                 # Punto de entrada
 ├── internal/
-│   ├── database/       # Capa de base de datos SQLite
-│   ├── docker/         # Cliente Docker
-│   ├── models/         # Modelos de datos
-│   └── server/         # Servidor HTTP y handlers
-├── scripts/            # Scripts de utilidad
-├── docs/              # Documentación
-├── go.mod             # Dependencias Go
-├── Makefile           # Comandos de build
-└── README.md          # Este archivo
+│   ├── database/             # Capa de datos SQLite + SQLC
+│   ├── docker/               # Cliente Docker
+│   ├── models/               # Modelos de datos
+│   ├── server/               # Servidor HTTP
+│   │   └── handlers/         # Handlers REST + SSE
+│   └── templates/            # Templates HTML (templ)
+├── docs/                     # Documentación
+├── scripts/                  # Scripts de utilidad
+└── Makefile                  # Comandos de build
 ```
 
-## Configuración
+## 🛠️ Tecnologías Utilizadas
 
-### Variables de Entorno
+- **Backend**: Go, Gorilla Mux, SQLite, SQLC
+- **Frontend**: HTML5, CSS3, JavaScript, Server-Sent Events
+- **Templates**: [templ](https://templ.guide/) para templates type-safe
+- **Containerización**: Docker API
+- **Logging**: Logrus
+- **Base de Datos**: SQLite con migraciones SQL
 
-- `DIPLO_HOST` - Host del servidor (default: 0.0.0.0)
-- `DIPLO_PORT` - Puerto del servidor (default: 8080)
-- `DIPLO_DB_PATH` - Ruta de la base de datos (default: diplo.db)
-
-### Docker
-
-El servidor necesita acceso al socket de Docker para gestionar contenedores:
-
-```bash
-# Asegúrate de que el usuario tenga permisos para acceder al socket de Docker
-sudo usermod -aG docker $USER
-```
-
-## Desarrollo
-
-### Comandos útiles
+## 🔧 Comandos de Desarrollo
 
 ```bash
-# Instalar dependencias
-make deps
+# Desarrollo con hot reload
+make dev
 
 # Ejecutar tests
 make test
 
+# Generar templates
+make generate
+
 # Limpiar archivos generados
 make clean
 
-# Ver todos los comandos disponibles
+# Ver todos los comandos
 make help
 ```
 
-### Agregar nuevos lenguajes
+## 🌍 Lenguajes Soportados
 
-Para agregar soporte para un nuevo lenguaje:
+| Lenguaje | Detección | Dockerfile | Estado |
+|----------|-----------|------------|---------|
+| Go       | `go.mod`  | ✅ Multi-stage | ✅ |
+| Node.js  | `package.json` | ✅ Alpine | ✅ |
+| Python   | `requirements.txt` | ✅ Alpine | ✅ |
+| Java     | `pom.xml` / `build.gradle` | 🔄 Próximamente | 🔄 |
+| Rust     | `Cargo.toml` | 🔄 Próximamente | 🔄 |
 
-1. Modificar `internal/server/server.go` en la función `generateDockerfile()`
-2. Agregar el template de Dockerfile correspondiente
-3. Actualizar la función `detectLanguage()` para detectar el nuevo lenguaje
+## 🤝 Contribuir
 
-## Arquitectura
-
-### Componentes principales
-
-- **Server**: Maneja las requests HTTP y coordina los deployments
-- **Database**: Persistencia de aplicaciones y logs
-- **Docker Client**: Comunicación con la API de Docker
-- **Models**: Estructuras de datos para aplicaciones
-
-### Flujo de deployment
-
-1. **Recepción de request** → Validación de datos
-2. **Creación de aplicación** → Asignación de puerto
-3. **Detección de lenguaje** → Análisis del repositorio
-4. **Generación de Dockerfile** → Template según lenguaje
-5. **Build de imagen** → Construcción via Docker API
-6. **Ejecución de contenedor** → Deployment en puerto asignado
-7. **Actualización de estado** → Persistencia en BD
-
-## Contribuir
+Las contribuciones son bienvenidas! Para contribuir:
 
 1. Fork el proyecto
-2. Crear una rama para tu feature (`git checkout -b feature/AmazingFeature`)
+2. Crea tu rama feature (`git checkout -b feature/AmazingFeature`)
 3. Commit tus cambios (`git commit -m 'Add some AmazingFeature'`)
 4. Push a la rama (`git push origin feature/AmazingFeature`)
-5. Abrir un Pull Request
+5. Abre un Pull Request
 
-## Licencia
+## 📝 Licencia
 
-Este proyecto está bajo la Licencia MIT. Ver el archivo `LICENSE` para más detalles.
+Este proyecto está bajo la Licencia MIT. Ver [LICENSE](LICENSE) para más detalles.
 
-## Roadmap
+## 🚧 Roadmap
 
-- [ ] Soporte para más lenguajes (Java, Rust, PHP)
-- [ ] Webhooks para notificaciones
-- [ ] Métricas y monitoreo
-- [ ] Autoscaling basado en carga
-- [ ] Volúmenes persistentes
-- [ ] Variables de entorno
-- [ ] Logs en tiempo real
-- [ ] Dashboard web 
+- [ ] 🔐 Autenticación y autorización
+- [ ] 📊 Métricas avanzadas (Prometheus)
+- [ ] 🔄 Webhooks para CI/CD
+- [ ] 📦 Soporte para más lenguajes
+- [ ] 🌐 Reverse proxy integrado
+- [ ] 💾 Volúmenes persistentes
+- [ ] ⚙️ Variables de entorno por app
+- [ ] 📈 Autoscaling basado en carga
+
+## 🆘 Soporte
+
+Si tienes preguntas o necesitas ayuda:
+- 📝 Abre un [Issue](https://github.com/rodrwan/diplo/issues)
+- 💬 Inicia una [Discusión](https://github.com/rodrwan/diplo/discussions)
+- 📧 Contacta al mantenedor
+
+---
+
+<div align="center">
+  <strong>Hecho con ❤️ en Go</strong>
+  <br>
+  <sub>Diplo - Simplificando deployments locales</sub>
+</div> 
