@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diplo - Eventos Docker en Tiempo Real</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 2.5em;
+            font-weight: 300;
+        }
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        .content {
+            padding: 30px;
+        }
+        .form-section {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+        input[type="text"], input[type="url"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e1e5e9;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s ease;
+            box-sizing: border-box;
+        }
+        input[type="text"]:focus, input[type="url"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s ease;
+        }
+        button:hover {
+            transform: translateY(-2px);
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .logs-section {
+            background: #1e1e1e;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 30px;
+            height: 500px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        .log-entry {
+            margin-bottom: 8px;
+            padding: 8px;
+            border-radius: 5px;
+            border-left: 4px solid #ccc;
+        }
+        .log-info {
+            background: rgba(0, 123, 255, 0.1);
+            border-left-color: #007bff;
+            color: #007bff;
+        }
+        .log-success {
+            background: rgba(40, 167, 69, 0.1);
+            border-left-color: #28a745;
+            color: #28a745;
+        }
+        .log-error {
+            background: rgba(220, 53, 69, 0.1);
+            border-left-color: #dc3545;
+            color: #dc3545;
+        }
+        .log-warning {
+            background: rgba(255, 193, 7, 0.1);
+            border-left-color: #ffc107;
+            color: #856404;
+        }
+        .docker-event {
+            background: rgba(102, 126, 234, 0.1);
+            border-left-color: #667eea;
+            color: #667eea;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+        .status-connecting {
+            background: #ffc107;
+            animation: pulse 1.5s infinite;
+        }
+        .status-connected {
+            background: #28a745;
+        }
+        .status-disconnected {
+            background: #dc3545;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        .event-details {
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 5px;
+            font-size: 12px;
+        }
+        .event-data {
+            color: #aaa;
+            margin-top: 5px;
+        }
+        .timestamp {
+            color: #666;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Diplo - Eventos Docker</h1>
+            <p>Monitoreo en tiempo real del proceso de deployment</p>
+        </div>
+        
+        <div class="content">
+            <div class="form-section">
+                <h2>Configuración de Deployment</h2>
+                <div class="form-group">
+                    <label for="appName">Nombre de la Aplicación:</label>
+                    <input type="text" id="appName" placeholder="mi-aplicacion" value="test-app">
+                </div>
+                <div class="form-group">
+                    <label for="repoUrl">URL del Repositorio:</label>
+                    <input type="url" id="repoUrl" placeholder="https://github.com/usuario/repo" value="https://github.com/rodrwan/diplo">
+                </div>
+                <button onclick="startDeployment()" id="deployBtn">🚀 Iniciar Deployment</button>
+            </div>
+
+            <div class="form-section">
+                <h2>Estado de Conexión</h2>
+                <p>
+                    <span class="status-indicator" id="statusIndicator"></span>
+                    <span id="statusText">Desconectado</span>
+                </p>
+                <button onclick="connectSSE()" id="connectBtn">📡 Conectar SSE</button>
+                <button onclick="disconnectSSE()" id="disconnectBtn" style="display: none;">❌ Desconectar</button>
+            </div>
+
+            <div class="logs-section" id="logsContainer">
+                <div class="log-entry log-info">
+                    <strong>📋 Sistema</strong> - Página cargada. Listo para monitorear eventos Docker.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let eventSource = null;
+        let currentAppId = null;
+
+        function updateStatus(status, text) {
+            const indicator = document.getElementById('statusIndicator');
+            const statusText = document.getElementById('statusText');
+            
+            indicator.className = 'status-indicator status-' + status;
+            statusText.textContent = text;
+        }
+
+        function addLogEntry(message, type = 'info', data = null) {
+            const logsContainer = document.getElementById('logsContainer');
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry log-${type}`;
+            
+            const timestamp = new Date().toLocaleTimeString();
+            let content = `<strong>⏰ ${timestamp}</strong> - ${message}`;
+            
+            if (data) {
+                content += `<div class="event-details">
+                    <div class="event-data"><strong>Datos:</strong> ${JSON.stringify(data, null, 2)}</div>
+                </div>`;
+            }
+            
+            logEntry.innerHTML = content;
+            logsContainer.appendChild(logEntry);
+            logsContainer.scrollTop = logsContainer.scrollHeight;
+        }
+
+        function connectSSE() {
+            if (eventSource) {
+                eventSource.close();
+            }
+
+            updateStatus('connecting', 'Conectando...');
+            
+            // Simular conexión SSE (en producción, esto sería la URL real)
+            eventSource = new EventSource('/api/v1/apps/test-app/logs');
+            
+            eventSource.onopen = function() {
+                updateStatus('connected', 'Conectado');
+                document.getElementById('connectBtn').style.display = 'none';
+                document.getElementById('disconnectBtn').style.display = 'inline-block';
+                addLogEntry('Conexión SSE establecida', 'success');
+            };
+            
+            eventSource.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.type === 'docker_event') {
+                        addLogEntry(`🐳 ${data.message}`, 'docker-event', data.data);
+                    } else if (data.type === 'log') {
+                        addLogEntry(`📝 ${data.message}`, 'info');
+                    } else if (data.type === 'success') {
+                        addLogEntry(`✅ ${data.message}`, 'success');
+                    } else if (data.type === 'error') {
+                        addLogEntry(`❌ ${data.message}`, 'error');
+                    } else if (data.type === 'warning') {
+                        addLogEntry(`⚠️ ${data.message}`, 'warning');
+                    } else {
+                        addLogEntry(`ℹ️ ${data.message}`, 'info');
+                    }
+                } catch (error) {
+                    addLogEntry(`Error parseando evento: ${error.message}`, 'error');
+                }
+            };
+            
+            eventSource.onerror = function() {
+                updateStatus('disconnected', 'Error de conexión');
+                addLogEntry('Error en la conexión SSE', 'error');
+            };
+        }
+
+        function disconnectSSE() {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+            updateStatus('disconnected', 'Desconectado');
+            document.getElementById('connectBtn').style.display = 'inline-block';
+            document.getElementById('disconnectBtn').style.display = 'none';
+            addLogEntry('Conexión SSE cerrada', 'info');
+        }
+
+        async function startDeployment() {
+            const appName = document.getElementById('appName').value;
+            const repoUrl = document.getElementById('repoUrl').value;
+            
+            if (!appName || !repoUrl) {
+                addLogEntry('Por favor, completa todos los campos', 'error');
+                return;
+            }
+
+            const deployBtn = document.getElementById('deployBtn');
+            deployBtn.disabled = true;
+            deployBtn.textContent = '⏳ Deploying...';
+
+            addLogEntry(`Iniciando deployment de: ${appName}`, 'info');
+
+            try {
+                const response = await fetch('/api/v1/deploy', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        name: appName,
+                        repo_url: repoUrl
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (response.ok) {
+                    currentAppId = result.id;
+                    addLogEntry(`Deployment iniciado. App ID: ${result.id}`, 'success');
+                    addLogEntry(`URL: ${result.url}`, 'info');
+                    
+                    // Conectar automáticamente al SSE
+                    setTimeout(() => {
+                        connectSSE();
+                    }, 1000);
+                } else {
+                    addLogEntry(`Error en deployment: ${result.message || 'Error desconocido'}`, 'error');
+                }
+            } catch (error) {
+                addLogEntry(`Error de red: ${error.message}`, 'error');
+            } finally {
+                deployBtn.disabled = false;
+                deployBtn.textContent = '🚀 Iniciar Deployment';
+            }
+        }
+
+        // Inicializar estado
+        updateStatus('disconnected', 'Desconectado');
+    </script>
+</body>
+</html> 

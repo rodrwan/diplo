@@ -8,7 +8,6 @@ obj/
 *.so
 *.dylib
 *.exe
-diplo
 
 # Archivos de base de datos
 *.db
@@ -92,3 +91,4 @@ docker-compose.override.yml
 # Archivos de configuración de red
 hosts
 resolv.conf
+.cursor/
