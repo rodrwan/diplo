@@ -9,7 +9,7 @@ BUILD_DIR=bin
 MAIN_PATH=./cmd/diplo
 
 # Comandos principales
-build: deps generate
+build: deps generate sqlc
 	@echo "Compilando Diplo..."
 	@mkdir -p $(BUILD_DIR)
 	go build -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PATH)
@@ -35,6 +35,10 @@ deps:
 generate:
 	@echo "Generando templates..."
 	go generate ./...
+
+sqlc:
+	@echo "Generando código SQL..."
+	sqlc generate
 
 # Desarrollo
 dev: deps
