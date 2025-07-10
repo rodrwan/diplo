@@ -6,8 +6,13 @@ import (
 	"fmt"
 	"time"
 
+	_ "embed"
+
 	_ "github.com/mattn/go-sqlite3"
 )
+
+//go:embed migrations/apps.sql
+var createAppsTable string
 
 var (
 	StatusIdle      = sql.NullString{String: "idle", Valid: true}
@@ -21,24 +26,8 @@ func GenerateAppID() string {
 }
 
 func (q *Queries) CreateTables(ctx context.Context) error {
-	createAppsTable := `
-		CREATE TABLE IF NOT EXISTS apps (
-			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL,
-			repo_url TEXT NOT NULL,
-			language TEXT,
-			port INTEGER,
-			container_id TEXT,
-			image_id TEXT,
-			status TEXT DEFAULT 'idle',
-			error_msg TEXT,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		);
-	`
-
 	if _, err := q.db.ExecContext(ctx, createAppsTable); err != nil {
-		return fmt.Errorf("error creando tabla apps: %w", err)
+		return fmt.Errorf("error creando tabla apps: %v", err)
 	}
 	return nil
 }

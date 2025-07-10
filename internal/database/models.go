@@ -13,7 +13,7 @@ type App struct {
 	Name        string         `db:"name" json:"name"`
 	RepoUrl     string         `db:"repo_url" json:"repo_url"`
 	Language    sql.NullString `db:"language" json:"language"`
-	Port        sql.NullInt64  `db:"port" json:"port"`
+	Port        int64          `db:"port" json:"port"`
 	ContainerID sql.NullString `db:"container_id" json:"container_id"`
 	ImageID     sql.NullString `db:"image_id" json:"image_id"`
 	Status      sql.NullString `db:"status" json:"status"`

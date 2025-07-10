@@ -16,6 +16,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/rodrwan/diplo/internal/database"
 	"github.com/rodrwan/diplo/internal/docker"
+	"github.com/rodrwan/diplo/internal/dto"
 	"github.com/rodrwan/diplo/internal/models"
 	"github.com/rodrwan/diplo/internal/templates"
 	"github.com/sirupsen/logrus"
@@ -60,6 +61,10 @@ func NewServer(host string, port int) *Server {
 	if err := queries.CreateTables(context.Background()); err != nil {
 		logrus.Fatalf("error creando tablas: %v", err)
 	}
+	if err := db.Close(); err != nil {
+		logrus.Errorf("error cerrando conexión a la base de datos: %v", err)
+	}
+
 	// Inicializar cliente Docker
 	dockerClient, err := docker.NewClient()
 	if err != nil {
@@ -197,7 +202,7 @@ func (s *Server) deployHandler(queries *database.Queries) http.HandlerFunc {
 			http.Error(w, "No se pudo asignar puerto libre", http.StatusInternalServerError)
 			return
 		}
-		app.Port = sql.NullInt64{Int64: int64(port), Valid: true}
+		app.Port = int64(port)
 
 		// Guardar en base de datos
 		if err := queries.CreateApp(r.Context(), database.CreateAppParams{
@@ -205,7 +210,7 @@ func (s *Server) deployHandler(queries *database.Queries) http.HandlerFunc {
 			Name:     app.Name,
 			RepoUrl:  req.RepoURL,
 			Language: sql.NullString{String: "Go", Valid: true},
-			Port:     sql.NullInt64{Int64: int64(port), Valid: true},
+			Port:     int64(port),
 		}); err != nil {
 			logrus.Errorf("Error guardando aplicación: %v", err)
 			http.Error(w, "Error guardando aplicación", http.StatusInternalServerError)
@@ -226,7 +231,7 @@ func (s *Server) deployHandler(queries *database.Queries) http.HandlerFunc {
 			"name":     app.Name,
 			"repo_url": app.RepoUrl,
 			"port":     app.Port,
-			"url":      fmt.Sprintf("http://localhost:%d", app.Port.Int64),
+			"url":      fmt.Sprintf("http://localhost:%d", app.Port),
 			"status":   "deploying",
 			"message":  "Aplicación creada y deployment iniciado",
 		}
@@ -241,9 +246,19 @@ func (s *Server) listAppsHandler(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	apps := make([]*database.App, 0, len(s.apps))
+	apps := make([]*dto.App, 0, len(s.apps))
 	for _, app := range s.apps {
-		apps = append(apps, app)
+		apps = append(apps, &dto.App{
+			ID:          app.ID,
+			Name:        app.Name,
+			RepoUrl:     app.RepoUrl,
+			Language:    app.Language.String,
+			Port:        int(app.Port),
+			ContainerID: app.ContainerID.String,
+			ImageID:     app.ImageID.String,
+			Status:      app.Status.String,
+			ErrorMsg:    app.ErrorMsg.String,
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -386,7 +401,7 @@ func (s *Server) deployApp(queries *database.Queries, app *database.App) {
 
 	// Generar Dockerfile
 	s.sendLogMessage(app.ID, "info", "Generando Dockerfile...")
-	dockerfile, err := generateDockerfile(app.RepoUrl, strconv.Itoa(int(app.Port.Int64)), language)
+	dockerfile, err := generateDockerfile(app.RepoUrl, strconv.Itoa(int(app.Port)), language)
 	if err != nil {
 		logrus.Errorf("Error generando Dockerfile: %v", err)
 		app.Status = database.StatusError
@@ -456,8 +471,8 @@ func (s *Server) deployApp(queries *database.Queries, app *database.App) {
 	s.sendLogMessage(app.ID, "success", "Imagen construida exitosamente")
 
 	// Ejecutar contenedor
-	logrus.Infof("Ejecutando contenedor en puerto %d", app.Port.Int64)
-	s.sendLogMessage(app.ID, "info", fmt.Sprintf("Ejecutando contenedor en puerto %d", app.Port.Int64))
+	logrus.Infof("Ejecutando contenedor en puerto %d", app.Port)
+	s.sendLogMessage(app.ID, "info", fmt.Sprintf("Ejecutando contenedor en puerto %d", app.Port))
 	containerID, err := s.docker.RunContainer(app, imageTag)
 	if err != nil {
 		logrus.Errorf("Error ejecutando contenedor: %v", err)
@@ -501,9 +516,9 @@ func (s *Server) deployApp(queries *database.Queries, app *database.App) {
 		}
 	}()
 
-	logrus.Infof("Deployment completado exitosamente: %s en puerto %d", app.ID, app.Port.Int64)
-	s.sendLogMessage(app.ID, "success", fmt.Sprintf("Deployment completado exitosamente en puerto %d", app.Port.Int64))
-	s.sendLogMessage(app.ID, "success", fmt.Sprintf("Aplicación disponible en: http://localhost:%d", app.Port.Int64))
+	logrus.Infof("Deployment completado exitosamente: %s en puerto %d", app.ID, app.Port)
+	s.sendLogMessage(app.ID, "success", fmt.Sprintf("Deployment completado exitosamente en puerto %d", app.Port))
+	s.sendLogMessage(app.ID, "success", fmt.Sprintf("Aplicación disponible en: http://localhost:%d", app.Port))
 }
 
 func (s *Server) loadApps(queries *database.Queries) error {

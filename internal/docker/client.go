@@ -129,7 +129,18 @@ func (d *Client) GenerateImageTag(appID, repoURL string) (string, error) {
 		d.sendDockerEvent("tag_step", "Commit hash obtained", map[string]interface{}{"step": "get_commit_hash", "hash": hash})
 	}
 
-	tag := fmt.Sprintf("diplo_%s_%s", appID, hash[:8])
+	// Limpiar el appID removiendo el prefijo 'app_' si existe
+	cleanAppID := strings.TrimPrefix(appID, "app_")
+
+	// Crear un tag más limpio: diplo-{cleanAppID}-{hash8}
+	// Usar guiones en lugar de guiones bajos para mejor compatibilidad
+	tag := fmt.Sprintf("diplo-%s-%s", cleanAppID, hash[:8])
+
+	// Reemplazar cualquier guión bajo restante con guiones
+	tag = strings.ReplaceAll(tag, "_", "-")
+
+	// Convertir a minúsculas para asegurar compatibilidad con Docker
+	tag = strings.ToLower(tag)
 
 	d.sendDockerEvent("tag_success", "Tag generated successfully", map[string]interface{}{"tag": tag, "hash": hash})
 	logrus.Infof("Generated image tag: %s", tag)
@@ -146,7 +157,12 @@ func (d *Client) CleanupOldImages(appID string, keepCount int) error {
 	}
 
 	var appImages []types.ImageSummary
-	prefix := fmt.Sprintf("diplo_%s_", appID)
+	// Limpiar appID y crear prefijo compatible con el nuevo formato
+	cleanAppID := strings.TrimPrefix(appID, "app_")
+	cleanAppID = strings.ReplaceAll(cleanAppID, "_", "-")
+	cleanAppID = strings.ToLower(cleanAppID)
+	prefix := fmt.Sprintf("diplo-%s-", cleanAppID)
+
 	for _, img := range images {
 		for _, tag := range img.RepoTags {
 			if strings.HasPrefix(tag, prefix) {

@@ -26,12 +26,13 @@ func (d *Client) BuildImage(imageName, dockerfileContent string) (string, error)
 		return "", fmt.Errorf("error creating build context: %w", err)
 	}
 
+	// Construir imagen sin tag para evitar problemas de tagging
 	buildOptions := types.ImageBuildOptions{
-		Tags:        []string{imageName},
 		Dockerfile:  dockerfileName,
 		Remove:      true,
 		ForceRemove: true,
 		NoCache:     true,
+		// No incluir Tags aquí para evitar problemas
 	}
 
 	d.sendDockerEvent("build_step", "Building Docker image", map[string]interface{}{"step": "docker_build", "image_name": imageName})
@@ -42,35 +43,53 @@ func (d *Client) BuildImage(imageName, dockerfileContent string) (string, error)
 	}
 	defer buildResp.Body.Close()
 
-	// Capturar el último ID de imagen del stream de build
-	var lastImageID string
-	if err := d.streamBuildOutputWithID(buildResp.Body, &lastImageID); err != nil {
+	// Capturar el ID de imagen del stream de build
+	var imageID string
+	if err := d.streamBuildOutputWithID(buildResp.Body, &imageID); err != nil {
 		d.sendDockerEvent("build_error", "Image build failed", map[string]interface{}{"error": err.Error()})
 		return "", err
 	}
 
-	d.sendDockerEvent("build_step", "Searching for built image", map[string]interface{}{"step": "find_image", "image_name": imageName})
-
-	// Intentar encontrar la imagen con retry logic
-	imageID, err := d.findImageByTagWithRetry(imageName, 5, time.Second*2)
-	if err != nil {
-		// Si no encontramos por tag, usar el ID capturado del build output como fallback
-		if lastImageID != "" {
-			logrus.Warnf("No se pudo encontrar imagen por tag %s, usando ID del build: %s", imageName, lastImageID)
-			d.sendDockerEvent("build_warning", "Using fallback image ID from build output", map[string]interface{}{
-				"image_name": imageName,
-				"image_id":   lastImageID,
-			})
-			imageID = lastImageID
-		} else {
-			d.sendDockerEvent("build_error", "Image not found after build", map[string]interface{}{"error": err.Error()})
-			return "", fmt.Errorf("image not found after build: %w", err)
-		}
+	if imageID == "" {
+		d.sendDockerEvent("build_error", "No image ID captured from build output", nil)
+		return "", fmt.Errorf("no image ID captured from build output")
 	}
 
-	d.sendDockerEvent("build_success", "Image built successfully", map[string]interface{}{"image_name": imageName, "image_id": imageID})
-	logrus.Infof("Image built successfully: %s (ID: %s)", imageName, imageID)
-	return imageID, nil
+	d.sendDockerEvent("build_step", "Tagging built image", map[string]interface{}{
+		"step":     "tag_image",
+		"image_id": imageID,
+		"tag":      imageName,
+	})
+
+	// Asignar tag manualmente después del build
+	if err := d.cli.ImageTag(context.Background(), imageID, imageName); err != nil {
+		d.sendDockerEvent("build_error", "Error tagging image", map[string]interface{}{
+			"error":    err.Error(),
+			"image_id": imageID,
+			"tag":      imageName,
+		})
+		return "", fmt.Errorf("error tagging image %s with tag %s: %w", imageID, imageName, err)
+	}
+
+	// Verificar que el tag se asignó correctamente
+	d.sendDockerEvent("build_step", "Verifying tagged image", map[string]interface{}{"step": "verify_tag", "tag": imageName})
+	taggedImageID, err := d.findImageByTag(imageName)
+	if err != nil {
+		logrus.Warnf("Tag verification failed, using original image ID: %s", imageID)
+		d.sendDockerEvent("build_warning", "Tag verification failed, using original image ID", map[string]interface{}{
+			"image_id": imageID,
+			"tag":      imageName,
+		})
+		// Continuar con el imageID original si la verificación falla
+		taggedImageID = imageID
+	}
+
+	d.sendDockerEvent("build_success", "Image built and tagged successfully", map[string]interface{}{
+		"image_name": imageName,
+		"image_id":   taggedImageID,
+	})
+	logrus.Infof("Image built and tagged successfully: %s (ID: %s)", imageName, taggedImageID)
+	return taggedImageID, nil
 }
 
 // createBuildContext creates a tar archive containing the Dockerfile.
@@ -100,7 +119,7 @@ func (d *Client) createBuildContext(dockerfileContent string) (*bytes.Buffer, er
 }
 
 // streamBuildOutputWithID processes the streaming output from an image build and captures the final image ID.
-func (d *Client) streamBuildOutputWithID(reader io.Reader, lastImageID *string) error {
+func (d *Client) streamBuildOutputWithID(reader io.Reader, imageID *string) error {
 	d.sendDockerEvent("build_step", "Streaming build logs", map[string]interface{}{"step": "stream_logs"})
 	decoder := json.NewDecoder(reader)
 	for {
@@ -117,12 +136,31 @@ func (d *Client) streamBuildOutputWithID(reader io.Reader, lastImageID *string) 
 			logrus.Debug(logMessage)
 			d.sendDockerEvent("build_log", logMessage, nil)
 
-			// Capturar el ID de imagen del output final
+			// Capturar el ID de imagen de diferentes formatos de output
 			if strings.Contains(logMessage, "Successfully built") {
 				parts := strings.Fields(logMessage)
 				if len(parts) >= 3 {
-					*lastImageID = parts[2]
-					logrus.Debugf("Captured image ID from build output: %s", *lastImageID)
+					*imageID = parts[2]
+					logrus.Debugf("Captured image ID from 'Successfully built': %s", *imageID)
+				}
+			} else if strings.HasPrefix(logMessage, "sha256:") {
+				// A veces el ID viene como "sha256:xxxxx"
+				*imageID = strings.TrimPrefix(logMessage, "sha256:")
+				logrus.Debugf("Captured image ID from 'sha256:': %s", *imageID)
+			}
+		}
+
+		// Capturar ID de imagen desde el campo Aux si está disponible
+		if jsonMessage.Aux != nil {
+			var auxData map[string]interface{}
+			if auxBytes, err := json.Marshal(jsonMessage.Aux); err == nil {
+				if err := json.Unmarshal(auxBytes, &auxData); err == nil {
+					if id, exists := auxData["ID"]; exists {
+						if idStr, ok := id.(string); ok && idStr != "" {
+							*imageID = idStr
+							logrus.Debugf("Captured image ID from Aux field: %s", *imageID)
+						}
+					}
 				}
 			}
 		}
@@ -131,6 +169,11 @@ func (d *Client) streamBuildOutputWithID(reader io.Reader, lastImageID *string) 
 			return fmt.Errorf("build failed: %s", jsonMessage.Error.Message)
 		}
 	}
+
+	if *imageID == "" {
+		return fmt.Errorf("no image ID found in build output")
+	}
+
 	return nil
 }
 
