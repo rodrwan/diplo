@@ -34,11 +34,13 @@ Diplo es una plataforma como servicio (PaaS) local escrita en Go que permite des
 ## 🖥️ Capturas de Pantalla
 
 ### Dashboard Principal
-![Dashboard de Aplicaciones](docs/screenshots/dashboard.png)
+![Dashboard de Aplicaciones](docs/screenshots/home.png)
 
 ### Proceso de Deployment
-![Deployment en Tiempo Real](docs/screenshots/deployment.png)
+![Deployment en Tiempo Real](docs/screenshots/deploy.png)
 
+### Estado del sistema
+![Estado del sistema](docs/screenshots/status.png)
 ### Monitoreo de Logs
 ![Logs en Tiempo Real](docs/screenshots/logs.png)
 

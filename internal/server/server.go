@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/rodrwan/diplo/internal/database"
 	"github.com/rodrwan/diplo/internal/docker"
+	"github.com/rodrwan/diplo/internal/runtime"
 	"github.com/rodrwan/diplo/internal/server/handlers"
 	"github.com/rodrwan/diplo/internal/templates"
 	"github.com/sirupsen/logrus"
@@ -20,12 +21,13 @@ import (
 )
 
 type Server struct {
-	router  *mux.Router
-	server  *http.Server
-	docker  *docker.Client
-	mu      sync.RWMutex
-	db      *sql.DB
-	queries database.Querier
+	router         *mux.Router
+	server         *http.Server
+	docker         *docker.Client
+	runtimeFactory runtime.RuntimeFactory
+	mu             sync.RWMutex
+	db             *sql.DB
+	queries        database.Querier
 	// Para SSE - canales de logs por app
 	logChannels map[string]chan string
 }
@@ -58,6 +60,9 @@ func NewServer(host string, port int) *Server {
 	srv.db = db
 	srv.queries = queries
 
+	// Inicializar runtime factory
+	srv.runtimeFactory = runtime.NewDefaultRuntimeFactory()
+
 	// Inicializar cliente Docker
 	dockerClient, err := docker.NewClient()
 	if err != nil {
@@ -85,6 +90,7 @@ func (s *Server) setupRoutes() {
 	s.router.HandleFunc("/", s.appsPageHandler).Methods("GET")
 	s.router.HandleFunc("/apps", s.appsPageHandler).Methods("GET")
 	s.router.HandleFunc("/deploy", s.deployPageHandler).Methods("GET")
+	s.router.HandleFunc("/status", s.statusPageHandler).Methods("GET")
 	s.router.HandleFunc("/logs", s.logsPageHandler).Methods("GET")
 	// Health check
 	s.router.HandleFunc("/health", s.healthHandler).Methods("GET")
@@ -102,6 +108,21 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/maintenance/prune-images", ctx.ServeHTTP(handlers.PruneImagesHandler)).Methods("POST")
 	// SSE endpoint para logs en tiempo real
 	api.HandleFunc("/apps/{id}/logs", ctx.ServeHTTP(handlers.LogsSSEHandler)).Methods("GET")
+
+	// Sistema híbrido - API endpoints
+	unifiedAPI := s.router.PathPrefix("/api/unified").Subrouter()
+	hybridCtx := handlers.NewHybridContext(s.docker, s.queries, s.logChannels, s.runtimeFactory)
+
+	unifiedAPI.HandleFunc("/status", hybridCtx.ServeHTTP(handlers.UnifiedStatusHandler)).Methods("GET")
+	unifiedAPI.HandleFunc("/deploy", hybridCtx.ServeHTTP(handlers.UnifiedDeployHandler)).Methods("POST")
+
+	// LXC específico - API endpoints
+	lxcAPI := s.router.PathPrefix("/api/lxc").Subrouter()
+	lxcAPI.HandleFunc("/status", hybridCtx.ServeHTTP(handlers.HybridLXCStatusHandler)).Methods("GET")
+
+	// Docker específico - API endpoints
+	dockerAPI := s.router.PathPrefix("/api/docker").Subrouter()
+	dockerAPI.HandleFunc("/status", hybridCtx.ServeHTTP(handlers.HybridDockerStatusHandler)).Methods("GET")
 }
 
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
@@ -126,6 +147,11 @@ func (s *Server) appsPageHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deployPageHandler(w http.ResponseWriter, r *http.Request) {
 	components := templates.DeployPage()
+	components.Render(r.Context(), w)
+}
+
+func (s *Server) statusPageHandler(w http.ResponseWriter, r *http.Request) {
+	components := templates.StatusPage()
 	components.Render(r.Context(), w)
 }
 

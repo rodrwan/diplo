@@ -259,6 +259,11 @@ templ Layout(title string, currentPage string) {
                     </a>
                 </li>
                 <li class="nav-item">
+                    <a href="/status" class={templ.KV("nav-link", true), templ.KV("active", currentPage == "status")}>
+                        📊 Estado
+                    </a>
+                </li>
+                <li class="nav-item">
                     <a href="/logs" class={templ.KV("nav-link", true), templ.KV("active", currentPage == "logs")}>
                         📋 Logs
                     </a>

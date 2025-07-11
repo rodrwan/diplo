@@ -39,10 +39,28 @@ templ AppsManager() {
         </div>
     </div>
 
-    <!-- Botón de refresh flotante -->
-    <button class="refresh-btn" onclick="loadApps()" title="Actualizar aplicaciones">
-        🔄
-    </button>
+    <!-- Botones flotantes -->
+    <div class="floating-buttons">
+        <button class="refresh-btn" onclick="loadApps()" title="Actualizar aplicaciones">
+            🔄
+        </button>
+        <button class="maintenance-btn" onclick="openMaintenanceMenu()" title="Mantenimiento del sistema">
+            🔧
+        </button>
+    </div>
+
+    <!-- Menú de mantenimiento -->
+    <div class="maintenance-menu" id="maintenanceMenu">
+        <div class="maintenance-content">
+            <h3>🔧 Mantenimiento del Sistema</h3>
+            <div class="maintenance-actions">
+                <button onclick="pruneImages()" class="btn btn-warning">🗑️ Limpiar Imágenes</button>
+                <button onclick="restartAllApps()" class="btn btn-danger">🔄 Reiniciar Todas</button>
+                <button onclick="exportAppsData()" class="btn btn-secondary">📥 Exportar Datos</button>
+                <button onclick="closeMaintenanceMenu()" class="btn btn-secondary">❌ Cerrar</button>
+            </div>
+        </div>
+    </div>
 
     <style>
         .stats-section {
@@ -227,24 +245,70 @@ templ AppsManager() {
         .empty-state a:hover {
             text-decoration: underline;
         }
-        .refresh-btn {
+        .floating-buttons {
             position: fixed;
             bottom: 30px;
             right: 30px;
-            background: #3498db;
-            color: #ecf0f1;
-            border: none;
-            border-radius: 50%;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            z-index: 1000;
+        }
+        .refresh-btn, .maintenance-btn {
             width: 60px;
             height: 60px;
+            border: none;
+            border-radius: 50%;
             font-size: 1.5em;
             cursor: pointer;
             box-shadow: 0 4px 20px rgba(0,0,0,0.4);
-            transition: transform 0.2s ease;
+            transition: all 0.3s ease;
+            color: #ecf0f1;
         }
-        .refresh-btn:hover {
+        .refresh-btn {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+        }
+        .maintenance-btn {
+            background: linear-gradient(135deg, #e67e22 0%, #f39c12 100%);
+        }
+        .refresh-btn:hover, .maintenance-btn:hover {
             transform: scale(1.1);
-            background: #2980b9;
+            box-shadow: 0 6px 25px rgba(0,0,0,0.5);
+        }
+        .maintenance-menu {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+        }
+        .maintenance-content {
+            background: #2d2d2d;
+            padding: 30px;
+            border-radius: 15px;
+            border: 1px solid #444;
+            text-align: center;
+            min-width: 400px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        .maintenance-content h3 {
+            color: #ecf0f1;
+            margin-bottom: 20px;
+            font-size: 1.4em;
+        }
+        .maintenance-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        .maintenance-actions .btn {
+            padding: 12px 20px;
+            font-size: 1em;
         }
         .notification {
             position: fixed;
@@ -370,6 +434,14 @@ templ AppsManager() {
                             <span class="detail-value">http://localhost:${app.port || 'N/A'}</span>
                         </div>
                         <div class="detail-row">
+                            <span class="detail-label">Lenguaje:</span>
+                            <span class="detail-value">${app.language || 'N/A'}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Runtime:</span>
+                            <span class="detail-value">${app.runtime_type || 'Docker'}</span>
+                        </div>
+                        <div class="detail-row">
                             <span class="detail-label">Repo:</span>
                             <span class="detail-value">${app.repo_url || 'N/A'}</span>
                         </div>
@@ -378,6 +450,7 @@ templ AppsManager() {
                     <div class="app-actions">
                         ${appUrl}
                         <button onclick="viewLogs('${app.id}', '${app.name}')" class="btn btn-secondary">📋 Logs</button>
+                        <button onclick="checkHealth('${app.id}')" class="btn btn-success">🔍 Health Check</button>
                         <button onclick="redeployApp('${app.id}')" class="btn btn-warning">🔄 Redeploy</button>
                         <button onclick="deleteApp('${app.id}', '${app.name}')" class="btn btn-danger">🗑️ Eliminar</button>
                     </div>
@@ -486,12 +559,12 @@ templ AppsManager() {
 
         // Función para eliminar aplicación
         async function deleteApp(appId, appName) {
-            if (!confirm(`¿Estás seguro de que quieres eliminar la aplicación "${appName}"?`)) {
+            if (!confirm('¿Estás seguro de que quieres eliminar la aplicación "' + appName + '"?')) {
                 return;
             }
 
             try {
-                const response = await fetch(`/api/v1/apps/${appId}`, {
+                const response = await fetch('/api/v1/apps/' + appId, {
                     method: 'DELETE'
                 });
 
@@ -500,10 +573,121 @@ templ AppsManager() {
                     loadApps(); // Recargar lista
                 } else {
                     const error = await response.json();
-                    showNotification(`Error eliminando aplicación: ${error.message}`, 'error');
+                    showNotification('Error eliminando aplicación: ' + error.message, 'error');
                 }
             } catch (error) {
-                showNotification(`Error de red: ${error.message}`, 'error');
+                showNotification('Error de red: ' + error.message, 'error');
+            }
+        }
+
+        // Función para health check
+        async function checkHealth(appId) {
+            try {
+                const app = apps.data.find(a => a.id === appId);
+                if (!app) {
+                    showNotification('Aplicación no encontrada', 'error');
+                    return;
+                }
+
+                if (app.status !== 'running') {
+                    showNotification('La aplicación no está ejecutándose', 'warning');
+                    return;
+                }
+
+                showNotification('Verificando salud de la aplicación...', 'info');
+
+                // Intentar hacer request HTTP a la aplicación
+                const healthResponse = await fetch('http://localhost:' + app.port + '/health', {
+                    method: 'GET',
+                    timeout: 5000
+                });
+
+                if (healthResponse.ok) {
+                    showNotification('✅ Aplicación saludable', 'success');
+                } else {
+                    showNotification('⚠️ Aplicación responde pero con errores', 'warning');
+                }
+            } catch (error) {
+                // Si no puede conectar, intentar un ping básico
+                try {
+                    const app = apps.data.find(a => a.id === appId);
+                    const pingResponse = await fetch('http://localhost:' + app.port, {
+                        method: 'GET',
+                        timeout: 5000
+                    });
+
+                    if (pingResponse.ok) {
+                        showNotification('✅ Aplicación responde correctamente', 'success');
+                    } else {
+                        showNotification('❌ Aplicación no responde correctamente', 'error');
+                    }
+                } catch (pingError) {
+                    showNotification('❌ No se puede conectar a la aplicación', 'error');
+                }
+            }
+        }
+
+        // Función para limpiar imágenes
+        async function pruneImages() {
+            if (!confirm('¿Estás seguro de que quieres limpiar las imágenes no utilizadas?')) {
+                return;
+            }
+
+            try {
+                showNotification('Limpiando imágenes...', 'info');
+
+                const response = await fetch('/api/v1/maintenance/prune-images', {
+                    method: 'POST'
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showNotification('✅ Imágenes limpiadas exitosamente', 'success');
+                } else {
+                    showNotification('❌ Error limpiando imágenes: ' + result.message, 'error');
+                }
+            } catch (error) {
+                showNotification('❌ Error de conexión: ' + error.message, 'error');
+            }
+        }
+
+        // Función para reiniciar aplicación
+        async function restartApp(appId) {
+            if (!confirm('¿Estás seguro de que quieres reiniciar esta aplicación?')) {
+                return;
+            }
+
+            try {
+                const app = apps.data.find(a => a.id === appId);
+                if (!app) {
+                    showNotification('Aplicación no encontrada', 'error');
+                    return;
+                }
+
+                showNotification('Reiniciando aplicación...', 'info');
+
+                // Primero hacer redeploy para reiniciar
+                const response = await fetch('/api/v1/deploy', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        name: app.name,
+                        repo_url: app.repo_url
+                    })
+                });
+
+                if (response.ok) {
+                    showNotification('✅ Aplicación reiniciada correctamente', 'success');
+                    setTimeout(loadApps, 2000);
+                } else {
+                    const error = await response.json();
+                    showNotification('❌ Error reiniciando aplicación: ' + error.message, 'error');
+                }
+            } catch (error) {
+                showNotification('❌ Error de red: ' + error.message, 'error');
             }
         }
 
@@ -515,10 +699,77 @@ templ AppsManager() {
             setInterval(loadApps, 30000);
         });
 
+        // Funciones para el menú de mantenimiento
+        function openMaintenanceMenu() {
+            document.getElementById('maintenanceMenu').style.display = 'flex';
+        }
+
+        function closeMaintenanceMenu() {
+            document.getElementById('maintenanceMenu').style.display = 'none';
+        }
+
+        // Función para reiniciar todas las aplicaciones
+        async function restartAllApps() {
+            if (!confirm('¿Estás seguro de que quieres reiniciar TODAS las aplicaciones?')) {
+                return;
+            }
+
+            closeMaintenanceMenu();
+            showNotification('Reiniciando todas las aplicaciones...', 'info');
+
+            const runningApps = apps.data.filter(app => app.status === 'running');
+
+            for (const app of runningApps) {
+                try {
+                    await fetch('/api/v1/deploy', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            name: app.name,
+                            repo_url: app.repo_url
+                        })
+                    });
+                } catch (error) {
+                    console.error('Error reiniciando app:', app.name, error);
+                }
+            }
+
+            showNotification('Reinicio masivo iniciado', 'success');
+            setTimeout(loadApps, 3000);
+        }
+
+        // Función para exportar datos de aplicaciones
+        function exportAppsData() {
+            const data = {
+                timestamp: new Date().toISOString(),
+                total_apps: apps.data.length,
+                stats: {
+                    running: apps.data.filter(app => app.status === 'running').length,
+                    deploying: apps.data.filter(app => app.status === 'deploying').length,
+                    error: apps.data.filter(app => app.status === 'error').length
+                },
+                applications: apps.data
+            };
+
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'diplo-apps-' + new Date().toISOString().split('T')[0] + '.json';
+            a.click();
+            URL.revokeObjectURL(url);
+
+            closeMaintenanceMenu();
+            showNotification('Datos exportados exitosamente', 'success');
+        }
+
         // Cerrar modal con Escape
         document.addEventListener('keydown', function(event) {
             if (event.key === 'Escape') {
                 closeLogsModal();
+                closeMaintenanceMenu();
             }
         });
     </script>

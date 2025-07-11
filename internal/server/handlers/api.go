@@ -27,11 +27,25 @@ type Context struct {
 	logMu       sync.RWMutex
 }
 
+// HybridContext extends Context with runtime factory support
+type HybridContext struct {
+	*Context
+	runtimeFactory interface{}
+}
+
 func NewContext(docker *docker.Client, queries database.Querier, logChannels map[string]chan string) *Context {
 	return &Context{
 		docker:      docker,
 		queries:     queries,
 		logChannels: logChannels,
+	}
+}
+
+// NewHybridContext creates a new HybridContext with runtime factory
+func NewHybridContext(docker *docker.Client, queries database.Querier, logChannels map[string]chan string, runtimeFactory interface{}) *HybridContext {
+	return &HybridContext{
+		Context:        NewContext(docker, queries, logChannels),
+		runtimeFactory: runtimeFactory,
 	}
 }
 
