@@ -9,6 +9,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/rodrwan/diplo/internal/database"
 	"github.com/rodrwan/diplo/internal/dto"
+	runtimePkg "github.com/rodrwan/diplo/internal/runtime"
 	"github.com/sirupsen/logrus"
 )
 
@@ -60,20 +61,141 @@ func DeleteAppHandler(ctx *Context, w http.ResponseWriter, r *http.Request) (Res
 		return Response{Code: http.StatusInternalServerError, Message: "Error obteniendo aplicación"}, err
 	}
 
-	// Detener y eliminar contenedor si existe (StopContainer ya incluye remove)
+	logrus.Infof("Iniciando eliminación de aplicación: %s (%s)", app.Name, app.ID)
+
+	// Eliminar contenedor si existe usando el método híbrido
 	if app.ContainerID.String != "" {
-		if err := ctx.docker.StopContainer(app.ContainerID.String); err != nil {
-			logrus.Warnf("Error deteniendo contenedor %s: %v", app.ContainerID.String, err)
+		if err := deleteContainerHybrid(ctx, &app); err != nil {
+			logrus.Warnf("Error eliminando contenedor %s: %v", app.ContainerID.String, err)
+		}
+	}
+
+	// Eliminar imagen si existe usando el método híbrido
+	if app.ImageID.String != "" {
+		if err := deleteImageHybrid(ctx, &app); err != nil {
+			logrus.Warnf("Error eliminando imagen %s: %v", app.ImageID.String, err)
 		}
 	}
 
 	// Eliminar aplicación de la base de datos
 	if err := ctx.queries.DeleteApp(r.Context(), appID); err != nil {
-		logrus.Errorf("Error eliminando aplicación: %v", err)
+		logrus.Errorf("Error eliminando aplicación de la base de datos: %v", err)
 		return Response{Code: http.StatusInternalServerError, Message: "Error eliminando aplicación"}, err
 	}
 
+	logrus.Infof("Aplicación eliminada exitosamente: %s (%s)", app.Name, app.ID)
 	return Response{Code: http.StatusOK, Message: "Aplicación eliminada exitosamente"}, nil
+}
+
+// deleteContainerHybrid elimina un contenedor usando el runtime apropiado
+func deleteContainerHybrid(ctx *Context, app *database.App) error {
+	containerID := app.ContainerID.String
+	logrus.Infof("Eliminando contenedor: %s", containerID)
+
+	// Intentar determinar el runtime basándose en el prefijo del container ID
+	runtimeType := inferRuntimeFromContainerID(containerID)
+
+	switch runtimeType {
+	case runtimePkg.RuntimeTypeDocker:
+		// Usar Docker client existente
+		if err := ctx.docker.StopContainer(containerID); err != nil {
+			return fmt.Errorf("error eliminando contenedor Docker: %w", err)
+		}
+		logrus.Infof("Contenedor Docker eliminado: %s", containerID)
+
+	case runtimePkg.RuntimeTypeLXC:
+		// Para LXC, usar el cliente específico
+		lxcClient, err := runtimePkg.NewLXCClient()
+		if err != nil {
+			logrus.Warnf("Error creando cliente LXC, usando Docker como fallback: %v", err)
+			return ctx.docker.StopContainer(containerID)
+		}
+		defer lxcClient.Close()
+
+		if err := lxcClient.StopContainer(context.Background(), containerID); err != nil {
+			return fmt.Errorf("error eliminando contenedor LXC: %w", err)
+		}
+
+		if err := lxcClient.RemoveContainer(context.Background(), containerID); err != nil {
+			return fmt.Errorf("error removiendo contenedor LXC: %w", err)
+		}
+		logrus.Infof("Contenedor LXC eliminado: %s", containerID)
+
+	case runtimePkg.RuntimeTypeContainerd:
+		// Para containerd, usar el cliente específico
+		containerdClient, err := runtimePkg.NewContainerdClient("", "")
+		if err != nil {
+			logrus.Warnf("Error creando cliente containerd, usando Docker como fallback: %v", err)
+			return ctx.docker.StopContainer(containerID)
+		}
+		defer containerdClient.Close()
+
+		if err := containerdClient.StopContainer(context.Background(), containerID); err != nil {
+			return fmt.Errorf("error eliminando contenedor containerd: %w", err)
+		}
+
+		if err := containerdClient.RemoveContainer(context.Background(), containerID); err != nil {
+			return fmt.Errorf("error removiendo contenedor containerd: %w", err)
+		}
+		logrus.Infof("Contenedor containerd eliminado: %s", containerID)
+
+	default:
+		// Fallback a Docker para aplicaciones existentes
+		logrus.Infof("Runtime no determinado, usando Docker como fallback para contenedor: %s", containerID)
+		if err := ctx.docker.StopContainer(containerID); err != nil {
+			return fmt.Errorf("error eliminando contenedor (Docker fallback): %w", err)
+		}
+	}
+
+	return nil
+}
+
+// deleteImageHybrid elimina una imagen usando el runtime apropiado
+func deleteImageHybrid(ctx *Context, app *database.App) error {
+	imageID := app.ImageID.String
+	logrus.Infof("Eliminando imagen: %s", imageID)
+
+	// Para imágenes, principalmente usamos Docker ya que es el que maneja builds
+	// En el futuro se puede expandir para otros runtimes que manejen imágenes
+
+	// Intentar eliminar imagen específica usando la nueva función RemoveImage
+	if err := ctx.docker.RemoveImage(imageID); err != nil {
+		logrus.Warnf("Error eliminando imagen específica %s: %v", imageID, err)
+
+		// Fallback: intentar limpiar todas las imágenes de la app
+		if err := ctx.docker.CleanupOldImages(app.ID, 0); err != nil {
+			logrus.Warnf("Error usando CleanupOldImages como fallback: %v", err)
+		}
+	}
+
+	// Ejecutar limpieza de imágenes dangling para limpiar capas huérfanas
+	if err := ctx.docker.PruneDanglingImages(); err != nil {
+		logrus.Warnf("Error limpiando imágenes dangling: %v", err)
+	}
+
+	logrus.Infof("Proceso de eliminación de imagen completado: %s", imageID)
+	return nil
+}
+
+// inferRuntimeFromContainerID intenta determinar el runtime basándose en el container ID
+func inferRuntimeFromContainerID(containerID string) runtimePkg.RuntimeType {
+	if containerID == "" {
+		return runtimePkg.RuntimeTypeDocker // Default fallback
+	}
+
+	// Patrones comunes de container IDs por runtime
+	switch {
+	case len(containerID) == 64: // Docker container IDs son típicamente 64 caracteres hex
+		return runtimePkg.RuntimeTypeDocker
+	case containerID[:4] == "lxc-": // LXC containers suelen tener prefijo
+		return runtimePkg.RuntimeTypeLXC
+	case containerID[:11] == "containerd-": // containerd puede tener prefijo específico
+		return runtimePkg.RuntimeTypeContainerd
+	default:
+		// Si no se puede determinar, usar Docker como fallback
+		logrus.Debugf("No se pudo determinar runtime para container ID: %s, usando Docker", containerID)
+		return runtimePkg.RuntimeTypeDocker
+	}
 }
 
 func HealthCheckHandler(ctx *Context, w http.ResponseWriter, r *http.Request) (Response, error) {

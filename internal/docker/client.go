@@ -224,3 +224,38 @@ func (d *Client) PruneDanglingImages() error {
 	}
 	return nil
 }
+
+// RemoveImage removes a specific image by ID or tag.
+func (d *Client) RemoveImage(imageIDOrTag string) error {
+	logrus.Infof("Removing image: %s", imageIDOrTag)
+	d.sendDockerEvent("image_remove_start", "Starting image removal", map[string]interface{}{"image": imageIDOrTag})
+
+	removedImages, err := d.cli.ImageRemove(context.Background(), imageIDOrTag, types.ImageRemoveOptions{
+		Force:         true,
+		PruneChildren: true,
+	})
+	if err != nil {
+		d.sendDockerEvent("image_remove_error", "Error removing image", map[string]interface{}{
+			"error": err.Error(),
+			"image": imageIDOrTag,
+		})
+		return fmt.Errorf("error removing image %s: %w", imageIDOrTag, err)
+	}
+
+	// Log información sobre las imágenes eliminadas
+	for _, removed := range removedImages {
+		if removed.Deleted != "" {
+			logrus.Debugf("Deleted image layer: %s", removed.Deleted)
+		}
+		if removed.Untagged != "" {
+			logrus.Debugf("Untagged image: %s", removed.Untagged)
+		}
+	}
+
+	d.sendDockerEvent("image_remove_success", "Image removed successfully", map[string]interface{}{
+		"image":         imageIDOrTag,
+		"removed_count": len(removedImages),
+	})
+	logrus.Infof("Image removed successfully: %s", imageIDOrTag)
+	return nil
+}
