@@ -67,6 +67,16 @@ func (d *Client) StopContainer(containerID string) error {
 	return nil
 }
 
+// GetContainerStatus returns the status of a container.
+func (d *Client) GetContainerStatus(containerID string) (string, error) {
+	containerJSON, err := d.cli.ContainerInspect(context.Background(), containerID)
+	if err != nil {
+		return "", fmt.Errorf("error inspecting container: %w", err)
+	}
+
+	return containerJSON.State.Status, nil
+}
+
 // GetContainerLogsStream gets a real-time stream of container logs.
 func (d *Client) GetContainerLogsStream(containerID string) (io.ReadCloser, error) {
 	logOptions := types.ContainerLogsOptions{

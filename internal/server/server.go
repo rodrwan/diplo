@@ -104,6 +104,7 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/apps", ctx.ServeHTTP(handlers.ListAppsHandler)).Methods("GET")
 	api.HandleFunc("/apps/{id}", ctx.ServeHTTP(handlers.GetAppHandler)).Methods("GET")
 	api.HandleFunc("/apps/{id}", ctx.ServeHTTP(handlers.DeleteAppHandler)).Methods("DELETE")
+	api.HandleFunc("/apps/{id}/health", ctx.ServeHTTP(handlers.HealthCheckHandler)).Methods("GET")
 	// Maintenance endpoints
 	api.HandleFunc("/maintenance/prune-images", ctx.ServeHTTP(handlers.PruneImagesHandler)).Methods("POST")
 	// SSE endpoint para logs en tiempo real

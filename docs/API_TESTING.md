@@ -1,180 +1,134 @@
-# Guía de Pruebas de la API de Diplo
-
-## Configuración de Postman
-
-### 1. Importar la Colección
-
-1. Abre Postman
-2. Haz clic en "Import" 
-3. Selecciona el archivo `docs/postman_collection.json`
-4. La colección "Diplo API - PaaS Local" se importará automáticamente
-
-### 2. Configurar Variables
-
-La colección incluye una variable `app_id` que se usa para las requests que necesitan un ID específico. Para usarla:
-
-1. Después de crear una aplicación con `POST /deploy`, copia el `id` de la respuesta
-2. En Postman, ve a la pestaña "Variables" de la colección
-3. Actualiza el valor de `app_id` con el ID real de tu aplicación
+# 🧪 Guía de Testing de la API de Diplo
 
 ## Endpoints Disponibles
 
-### 1. Health Check
-- **GET** `http://localhost:8080/`
-- **Descripción**: Verificar que el servidor esté funcionando
-- **Respuesta esperada**: Mensaje de bienvenida
-
-### 2. Deploy Application
-- **POST** `http://localhost:8080/api/v1/deploy`
-- **Headers**: `Content-Type: application/json`
-- **Body**:
-```json
-{
-  "repo_url": "https://github.com/example/go-app",
-  "name": "mi-aplicacion-go"
-}
-```
-- **Respuesta esperada**:
-```json
-{
-  "id": "app_1234567890_123456",
-  "name": "mi-aplicacion-go",
-  "repo_url": "https://github.com/example/go-app",
-  "port": 8081,
-  "url": "http://localhost:8081",
-  "status": "deploying",
-  "message": "Aplicación creada y deployment iniciado"
-}
+### 1. Health Check del Servidor
+```bash
+GET /health
 ```
 
-### 3. Get All Applications
-- **GET** `http://localhost:8080/api/v1/apps`
-- **Descripción**: Obtener todas las aplicaciones desplegadas
-- **Respuesta esperada**:
+### 2. Aplicaciones
+```bash
+GET /api/v1/apps              # Listar todas las aplicaciones
+GET /api/v1/apps/{id}         # Obtener detalles de una aplicación
+DELETE /api/v1/apps/{id}      # Eliminar una aplicación
+POST /api/v1/deploy           # Desplegar nueva aplicación
+```
+
+### 3. Logs en Tiempo Real
+```bash
+GET /api/v1/apps/{id}/logs    # SSE stream de logs
+```
+
+### 4. Health Check de Aplicaciones
+```bash
+GET /api/v1/apps/{id}/health  # Verificar salud de la aplicación
+```
+
+**Nuevo Endpoint:** Este endpoint resuelve el problema de CORS al hacer healthchecks desde el frontend. En lugar de que el navegador haga llamadas directas a `localhost:<puerto>`, se hace la llamada a través de nuestra API.
+
+#### Respuesta del Health Check:
 ```json
-[
-  {
-    "id": "app_1234567890_123456",
-    "name": "mi-aplicacion-go",
-    "repo_url": "https://github.com/example/go-app",
-    "language": "go",
-    "port": 8081,
-    "url": "http://localhost:8081",
-    "container_id": "abc123def456",
-    "status": "running",
-    "error_msg": "",
-    "created_at": 1703123456,
-    "updated_at": 1703123456
+{
+  "code": 200,
+  "data": {
+    "healthy": true,
+    "status": "healthy",
+    "message": "Servicio respondió con código 200",
+    "details": {
+      "url": "http://localhost:3000",
+      "http_status_code": 200,
+      "container_id": "abc123",
+      "container_status": "running",
+      "response_time_ms": 45,
+      "timestamp": "2024-01-10T10:30:00Z"
+    }
   }
-]
+}
 ```
 
-### 4. Get Application by ID
-- **GET** `http://localhost:8080/api/v1/apps/{{app_id}}`
-- **Descripción**: Obtener detalles de una aplicación específica
-- **Respuesta esperada**: Objeto con información completa de la app
+#### Posibles Estados:
+- **healthy**: Aplicación responde correctamente (HTTP 200-399)
+- **unhealthy**: Aplicación responde con errores (HTTP 400+)
+- **container_not_running**: El contenedor no está ejecutándose
+- **connection_error**: No se puede conectar al servicio
+- **error**: Error verificando estado del contenedor
 
-### 5. Delete Application
-- **DELETE** `http://localhost:8080/api/v1/apps/{{app_id}}`
-- **Descripción**: Eliminar aplicación y su contenedor
-- **Respuesta esperada**: Confirmación de eliminación
-
-### 6. 🆕 Logs en Tiempo Real (SSE)
-- **GET** `http://localhost:8080/api/v1/apps/{{app_id}}/logs`
-- **Descripción**: Obtener logs en tiempo real usando Server-Sent Events
-- **Headers**: `Accept: text/event-stream`
-- **Respuesta**: Stream de eventos SSE con logs en tiempo real
-
-#### Ejemplo de uso con JavaScript:
-```javascript
-const eventSource = new EventSource('http://localhost:8080/api/v1/apps/app_1234567890_123456/logs');
-
-eventSource.onmessage = function(event) {
-    const data = JSON.parse(event.data);
-    console.log(`[${data.type}] ${data.message}`);
-};
-
-eventSource.onerror = function(event) {
-    console.error('Error en conexión SSE');
-};
-```
-
-#### Tipos de mensajes SSE:
-- `connected`: Conexión establecida
-- `info`: Información general del proceso
-- `success`: Operación exitosa
-- `error`: Error en el proceso
-- `log`: Log del contenedor en ejecución
-
-## Testing con Herramientas
-
-### 1. Postman
-- Usa la colección importada para probar endpoints REST
-- Para SSE, usa herramientas como curl o el navegador
-
-### 2. cURL
+### 5. Mantenimiento
 ```bash
-# Health check
-curl http://localhost:8080/
+POST /api/v1/maintenance/prune-images  # Limpiar imágenes no utilizadas
+```
 
-# Deploy app
+### 6. Sistema Híbrido
+```bash
+GET /api/unified/status       # Estado completo del sistema híbrido
+POST /api/unified/deploy      # Deployment con selección automática de runtime
+GET /api/docker/status        # Estado específico de Docker
+GET /api/lxc/status          # Estado específico de LXC
+```
+
+## Ejemplos de Uso
+
+### Deployment Básico
+```bash
 curl -X POST http://localhost:8080/api/v1/deploy \
   -H "Content-Type: application/json" \
-  -d '{"repo_url": "https://github.com/user/repo.git"}'
-
-# Get apps
-curl http://localhost:8080/api/v1/apps
-
-# SSE logs (en otra terminal)
-curl -N http://localhost:8080/api/v1/apps/app_1234567890_123456/logs
+  -d '{
+    "repo_url": "https://github.com/gin-gonic/gin.git",
+    "name": "gin-api"
+  }'
 ```
 
-### 3. Página de Testing SSE
-- Abre `docs/sse_test.html` en tu navegador
-- Ingresa el ID de una aplicación
-- Haz clic en "Conectar" para ver logs en tiempo real
-
-## Flujo de Testing Completo
-
-### 1. Deploy y Monitoreo
+### Health Check de Aplicación
 ```bash
-# 1. Deploy una aplicación
-curl -X POST http://localhost:8080/api/v1/deploy \
-  -H "Content-Type: application/json" \
-  -d '{"repo_url": "https://github.com/rodrwan/simple-go-app.git"}'
+# Primero obtener el ID de la aplicación
+APP_ID=$(curl -s http://localhost:8080/api/v1/apps | jq -r '.data[0].id')
 
-# 2. Obtener el ID de la respuesta
-# 3. Abrir SSE en otra terminal o navegador
-# 4. Monitorear logs en tiempo real
+# Luego hacer health check
+curl -s http://localhost:8080/api/v1/apps/$APP_ID/health | jq '.'
 ```
 
-### 2. Verificar Estado
+### Monitoring con Watch
 ```bash
-# Ver todas las apps
-curl http://localhost:8080/api/v1/apps
-
-# Ver app específica
-curl http://localhost:8080/api/v1/apps/app_1234567890_123456
+# Monitorear el estado de una aplicación cada 5 segundos
+watch -n 5 "curl -s http://localhost:8080/api/v1/apps/$APP_ID/health | jq '.data.healthy'"
 ```
 
-### 3. Limpiar
+## Scripts de Testing
+
+### Test Completo
 ```bash
-# Eliminar aplicación
-curl -X DELETE http://localhost:8080/api/v1/apps/app_1234567890_123456
+./scripts/test_api.sh
 ```
+
+### Test del Sistema Híbrido
+```bash
+./scripts/test_hybrid_system.sh
+```
+
+### Test Específico de LXC
+```bash
+./scripts/test_lxc_deploy.sh
+```
+
+## Ventajas del Nuevo Health Check
+
+1. **Sin CORS**: El endpoint funciona desde cualquier origen
+2. **Información Completa**: Incluye estado del contenedor y métricas
+3. **Timeout Configurado**: Evita esperas infinitas
+4. **Manejo de Errores**: Respuestas estructuradas para todos los casos
+5. **Integración con Frontend**: Funciona perfectamente con el botón de Health Check
 
 ## Troubleshooting
 
-### Problemas Comunes
+### Aplicación no responde al Health Check
+1. Verificar que el contenedor esté ejecutándose
+2. Verificar que el puerto esté correctamente mapeado
+3. Verificar que la aplicación esté escuchando en el puerto correcto
+4. Revisar los logs de la aplicación
 
-1. **Error de CORS**: Asegúrate de que el servidor esté configurado con CORS
-2. **SSE no funciona**: Verifica que el navegador soporte EventSource
-3. **Logs no aparecen**: Confirma que la aplicación esté ejecutándose
-4. **Puerto ocupado**: Verifica que el puerto 8080 esté libre
-
-### Debugging
-
-1. **Logs del servidor**: Revisa la salida del servidor Diplo
-2. **Logs de Docker**: `docker logs <container_id>`
-3. **Estado de contenedores**: `docker ps`
-4. **Logs de la aplicación**: Usa el endpoint SSE 
+### Error de CORS (Legacy)
+Si aún experimentas problemas de CORS:
+1. Usa el nuevo endpoint `/api/v1/apps/{id}/health`
+2. No hagas llamadas directas desde el frontend a `localhost:<puerto>`
+3. Actualiza el frontend para usar la nueva API 

@@ -596,34 +596,36 @@ templ AppsManager() {
 
                 showNotification('Verificando salud de la aplicación...', 'info');
 
-                // Intentar hacer request HTTP a la aplicación
-                const healthResponse = await fetch('http://localhost:' + app.port + '/health', {
+                // Usar el endpoint de healthcheck de nuestra API para evitar CORS
+                const response = await fetch(`/api/v1/apps/${appId}/health`, {
                     method: 'GET',
-                    timeout: 5000
+                    timeout: 10000
                 });
 
-                if (healthResponse.ok) {
-                    showNotification('✅ Aplicación saludable', 'success');
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    showNotification(`❌ Error en healthcheck: ${errorData.message}`, 'error');
+                    return;
+                }
+
+                const healthData = await response.json();
+                
+                if (healthData.data.healthy) {
+                    showNotification(`✅ Aplicación saludable (${healthData.data.details.http_status_code})`, 'success');
                 } else {
-                    showNotification('⚠️ Aplicación responde pero con errores', 'warning');
+                    const status = healthData.data.status;
+                    const message = healthData.data.message;
+                    
+                    if (status === 'container_not_running') {
+                        showNotification(`⚠️ Contenedor no está ejecutándose: ${message}`, 'warning');
+                    } else if (status === 'connection_error') {
+                        showNotification(`❌ Error de conexión: ${message}`, 'error');
+                    } else {
+                        showNotification(`❌ Aplicación no saludable: ${message}`, 'error');
+                    }
                 }
             } catch (error) {
-                // Si no puede conectar, intentar un ping básico
-                try {
-                    const app = apps.data.find(a => a.id === appId);
-                    const pingResponse = await fetch('http://localhost:' + app.port, {
-                        method: 'GET',
-                        timeout: 5000
-                    });
-
-                    if (pingResponse.ok) {
-                        showNotification('✅ Aplicación responde correctamente', 'success');
-                    } else {
-                        showNotification('❌ Aplicación no responde correctamente', 'error');
-                    }
-                } catch (pingError) {
-                    showNotification('❌ No se puede conectar a la aplicación', 'error');
-                }
+                showNotification(`❌ Error verificando salud: ${error.message}`, 'error');
             }
         }
 
