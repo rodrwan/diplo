@@ -1,11 +1,15 @@
 package handlers
 
 import (
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"runtime"
 	"time"
 
+	"github.com/rodrwan/diplo/internal/database"
+	"github.com/rodrwan/diplo/internal/models"
 	runtimePkg "github.com/rodrwan/diplo/internal/runtime"
 	"github.com/sirupsen/logrus"
 )
@@ -40,14 +44,13 @@ func UnifiedStatusHandler(ctx *HybridContext, w http.ResponseWriter, r *http.Req
 
 // UnifiedDeployHandler maneja el endpoint POST /api/unified/deploy
 func UnifiedDeployHandler(ctx *HybridContext, w http.ResponseWriter, r *http.Request) (Response, error) {
-	var req map[string]interface{}
+	var req models.DeployRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return Response{Code: http.StatusBadRequest, Message: "JSON inválido"}, nil
 	}
 
 	// Validar campos requeridos
-	repoURL, ok := req["repo_url"].(string)
-	if !ok || repoURL == "" {
+	if req.RepoURL == "" {
 		return Response{Code: http.StatusBadRequest, Message: "repo_url es requerido"}, nil
 	}
 
@@ -57,14 +60,63 @@ func UnifiedDeployHandler(ctx *HybridContext, w http.ResponseWriter, r *http.Req
 		return Response{Code: http.StatusInternalServerError, Message: "Error interno del servidor"}, nil
 	}
 
+	// Verificar si ya existe una aplicación con este repo_url
+	existingApp, err := ctx.queries.GetAppByRepoUrl(r.Context(), req.RepoURL)
+	if err != nil && err != sql.ErrNoRows {
+		logrus.Errorf("Error verificando aplicación existente: %v", err)
+		return Response{Code: http.StatusInternalServerError, Message: "Error verificando aplicación existente"}, err
+	}
+
+	// Si existe una app con el mismo repo_url, hacer redeploy
+	if err != sql.ErrNoRows {
+		logrus.Infof("App existente encontrada para %s, haciendo redeploy: %s", req.RepoURL, existingApp.ID)
+
+		// Actualizar nombre si se proporcionó uno nuevo
+		if req.Name != "" && req.Name != existingApp.Name {
+			existingApp.Name = req.Name
+		}
+
+		// Iniciar redeploy en background usando runtime factory
+		go unifiedRedeployApp(ctx, &existingApp, factory)
+
+		// Responder inmediatamente
+		response := map[string]interface{}{
+			"id":           existingApp.ID,
+			"name":         existingApp.Name,
+			"repo_url":     existingApp.RepoUrl,
+			"port":         existingApp.Port,
+			"url":          fmt.Sprintf("http://localhost:%d", existingApp.Port),
+			"status":       "redeploying",
+			"runtime_type": factory.GetPreferredRuntime(),
+			"message":      "Redeploy iniciado para aplicación existente",
+		}
+
+		return Response{Code: http.StatusOK, Data: response}, nil
+	}
+
+	// Si no existe, crear nueva aplicación
+	app := &database.App{
+		ID:      database.GenerateAppID(),
+		Name:    req.Name,
+		RepoUrl: req.RepoURL,
+	}
+
+	// Asignar puerto libre
+	port, err := findFreePort()
+	if err != nil {
+		logrus.Errorf("Error asignando puerto: %v", err)
+		return Response{Code: http.StatusInternalServerError, Message: "No se pudo asignar puerto libre"}, err
+	}
+	app.Port = int64(port)
+
 	// Determinar runtime a usar
 	selectedRuntime := factory.GetPreferredRuntime()
-	if runtimeType, exists := req["runtime_type"].(string); exists && runtimeType != "" {
+	if req.RuntimeType != "" {
 		// Validar que el runtime solicitado esté disponible
 		availableRuntimes := factory.GetAvailableRuntimes()
 		found := false
 		for _, available := range availableRuntimes {
-			if string(available) == runtimeType {
+			if string(available) == req.RuntimeType {
 				selectedRuntime = available
 				found = true
 				break
@@ -75,16 +127,32 @@ func UnifiedDeployHandler(ctx *HybridContext, w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	// Por ahora, devolver respuesta de éxito simulada
+	// Guardar en base de datos
+	if err := ctx.queries.CreateApp(r.Context(), database.CreateAppParams{
+		ID:       app.ID,
+		Name:     app.Name,
+		RepoUrl:  req.RepoURL,
+		Language: sql.NullString{String: "unknown", Valid: true}, // Se detectará durante el deployment
+		Port:     int64(port),
+		Status:   database.StatusDeploying,
+	}); err != nil {
+		logrus.Errorf("Error guardando aplicación: %v", err)
+		return Response{Code: http.StatusInternalServerError, Message: "Error guardando aplicación"}, err
+	}
+
+	// Iniciar deployment en background usando runtime factory
+	go unifiedDeployApp(ctx, app, factory, selectedRuntime)
+
+	// Responder inmediatamente
 	response := map[string]interface{}{
-		"id":           generateSimpleID(),
-		"name":         req["name"],
-		"repo_url":     repoURL,
-		"language":     req["language"],
-		"runtime_type": selectedRuntime,
+		"id":           app.ID,
+		"name":         app.Name,
+		"repo_url":     app.RepoUrl,
+		"port":         app.Port,
+		"url":          fmt.Sprintf("http://localhost:%d", app.Port),
 		"status":       "deploying",
-		"message":      "Deployment iniciado con runtime " + string(selectedRuntime),
-		"created_at":   time.Now(),
+		"runtime_type": selectedRuntime,
+		"message":      "Aplicación creada y deployment iniciado con runtime " + string(selectedRuntime),
 	}
 
 	return Response{Code: http.StatusCreated, Data: response}, nil
@@ -176,4 +244,43 @@ func getSupportedImages(runtimeType runtimePkg.RuntimeType) []string {
 	default:
 		return []string{}
 	}
+}
+
+// unifiedDeployApp ejecuta el deployment usando el runtime factory
+func unifiedDeployApp(ctx *HybridContext, app *database.App, factory runtimePkg.RuntimeFactory, selectedRuntime runtimePkg.RuntimeType) {
+	logrus.Infof("Iniciando deployment unificado de: %s (%s) con runtime %s", app.Name, app.ID, selectedRuntime)
+
+	// Si el runtime seleccionado es Docker, usar el sistema Docker existente
+	if selectedRuntime == runtimePkg.RuntimeTypeDocker {
+		// Convertir HybridContext a Context regular para usar deployApp existente
+		regularCtx := ctx.Context
+		deployApp(regularCtx, app)
+		return
+	}
+
+	// Para otros runtimes, implementar lógica específica
+	logrus.Infof("Runtime %s no tiene implementación específica, usando Docker como fallback", selectedRuntime)
+	regularCtx := ctx.Context
+	deployApp(regularCtx, app)
+}
+
+// unifiedRedeployApp ejecuta el redeploy usando el runtime factory
+func unifiedRedeployApp(ctx *HybridContext, app *database.App, factory runtimePkg.RuntimeFactory) {
+	logrus.Infof("Iniciando redeploy unificado de: %s (%s)", app.Name, app.ID)
+
+	// Obtener runtime preferido para el redeploy
+	preferredRuntime := factory.GetPreferredRuntime()
+
+	// Si el runtime preferido es Docker, usar el sistema Docker existente
+	if preferredRuntime == runtimePkg.RuntimeTypeDocker {
+		// Convertir HybridContext a Context regular para usar redeployExistingApp existente
+		regularCtx := ctx.Context
+		redeployExistingApp(regularCtx, app)
+		return
+	}
+
+	// Para otros runtimes, implementar lógica específica
+	logrus.Infof("Runtime %s no tiene implementación específica, usando Docker como fallback", preferredRuntime)
+	regularCtx := ctx.Context
+	redeployExistingApp(regularCtx, app)
 }

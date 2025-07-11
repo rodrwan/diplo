@@ -7,7 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"net"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +20,7 @@ import (
 	"github.com/rodrwan/diplo/internal/database"
 	"github.com/rodrwan/diplo/internal/docker"
 	"github.com/rodrwan/diplo/internal/models"
+	runtimePkg "github.com/rodrwan/diplo/internal/runtime"
 	"github.com/sirupsen/logrus"
 )
 
@@ -587,38 +592,122 @@ func createLogMessage(logType, message string) string {
 // Utils
 
 func findFreePort() (int, error) {
-	// Implementar lógica para encontrar puerto libre
-	// Por ahora, usar puerto aleatorio entre 3000-9999
-	return 3000 + rand.Intn(7000), nil
+	const (
+		minPort     = 3000
+		maxPort     = 9999
+		maxAttempts = 50
+	)
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		// Generar puerto aleatorio en el rango
+		port := minPort + rand.Intn(maxPort-minPort+1)
+
+		// Verificar si el puerto está disponible
+		if isPortAvailable(port) {
+			logrus.Debugf("Puerto libre encontrado: %d (intento %d)", port, attempt+1)
+			return port, nil
+		}
+
+		logrus.Debugf("Puerto %d ocupado, intentando otro...", port)
+	}
+
+	return 0, fmt.Errorf("no se pudo encontrar un puerto libre después de %d intentos", maxAttempts)
+}
+
+// isPortAvailable verifica si un puerto está disponible para uso
+func isPortAvailable(port int) bool {
+	// Intentar abrir el puerto en localhost
+	address := fmt.Sprintf(":%d", port)
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		// Si no se puede abrir, está ocupado
+		return false
+	}
+
+	// Si se puede abrir, cerrarlo inmediatamente
+	listener.Close()
+	return true
 }
 
 func detectLanguage(repoURL string) (string, error) {
-	// Implementar detección de lenguaje
-	// Por ahora, usar Go por defecto
+	logrus.Debugf("Detectando lenguaje para repo: %s", repoURL)
+
+	// Crear directorio temporal
+	tempDir, err := os.MkdirTemp("", "diplo-detect-*")
+	if err != nil {
+		return "", fmt.Errorf("error creando directorio temporal: %w", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Clonar repositorio con profundidad mínima
+	cloneCmd := exec.Command("git", "clone", "--depth", "1", repoURL, tempDir)
+	if err := cloneCmd.Run(); err != nil {
+		return "", fmt.Errorf("error clonando repositorio: %w", err)
+	}
+
+	// Definir archivos característicos por lenguaje
+	languageIndicators := map[string][]string{
+		"go":         {"go.mod", "go.sum", "main.go", "*.go"},
+		"javascript": {"package.json", "yarn.lock", "package-lock.json", "app.js", "index.js", "server.js"},
+		"python":     {"requirements.txt", "setup.py", "pyproject.toml", "Pipfile", "app.py", "main.py", "*.py"},
+		"rust":       {"Cargo.toml", "Cargo.lock", "src/main.rs", "src/lib.rs"},
+		"java":       {"pom.xml", "build.gradle", "gradlew", "src/main/java"},
+		"php":        {"composer.json", "composer.lock", "index.php", "*.php"},
+		"ruby":       {"Gemfile", "Gemfile.lock", "config.ru", "*.rb"},
+	}
+
+	// Buscar archivos característicos en orden de prioridad
+	for language, indicators := range languageIndicators {
+		for _, indicator := range indicators {
+			var found bool
+			if strings.Contains(indicator, "*") {
+				// Usar pattern matching para archivos con wildcards
+				matches, err := filepath.Glob(filepath.Join(tempDir, indicator))
+				if err == nil && len(matches) > 0 {
+					found = true
+				}
+				// También buscar en subdirectorios comunes
+				matches, err = filepath.Glob(filepath.Join(tempDir, "src", indicator))
+				if err == nil && len(matches) > 0 {
+					found = true
+				}
+			} else {
+				// Buscar archivo específico
+				if _, err := os.Stat(filepath.Join(tempDir, indicator)); err == nil {
+					found = true
+				}
+			}
+
+			if found {
+				logrus.Infof("Lenguaje detectado: %s (encontrado: %s)", language, indicator)
+				return language, nil
+			}
+		}
+	}
+
+	// Si no se detecta ningún lenguaje, usar Go como fallback
+	logrus.Warnf("No se pudo detectar el lenguaje para %s, usando Go como fallback", repoURL)
 	return "go", nil
 }
 
 func generateDockerfile(repoURL, port, language string) (string, error) {
-	// Implementar generación de Dockerfile según lenguaje
-	template := `# Diplo - Dockerfile generado automáticamente
-FROM golang:1.24-alpine AS builder
-WORKDIR /app
-RUN apk add --no-cache git
-RUN git clone %s .
-RUN go mod download
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
+	logrus.Debugf("Generando Dockerfile para lenguaje: %s, puerto: %s", language, port)
 
-FROM alpine:latest
-RUN apk --no-cache add ca-certificates
-WORKDIR /root/
-COPY --from=builder /app/main .
-EXPOSE %s
-CMD ["./main"]`
+	// Crear manager de templates Docker
+	templateManager := runtimePkg.NewDockerTemplateManager()
 
-	switch language {
-	case "go":
-		return fmt.Sprintf(template, repoURL, port), nil
+	// Parsear puerto como entero
+	portInt, err := strconv.Atoi(port)
+	if err != nil {
+		return "", fmt.Errorf("puerto inválido: %s", port)
 	}
 
-	return "", fmt.Errorf("lenguaje no soportado: %s", language)
+	// Renderizar el Dockerfile usando el template
+	dockerfile, err := templateManager.RenderTemplate(language, portInt, repoURL)
+	if err != nil {
+		return "", fmt.Errorf("error renderizando template para %s: %w", language, err)
+	}
+
+	logrus.Debugf("Dockerfile generado exitosamente para %s", language)
+	return dockerfile, nil
 }

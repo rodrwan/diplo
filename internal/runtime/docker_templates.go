@@ -50,14 +50,11 @@ RUN apk add --no-cache git ca-certificates
 # Configurar directorio de trabajo
 WORKDIR /app
 
-# Copiar archivos go.mod y go.sum
-COPY go.mod go.sum ./
+# Clonar repositorio
+RUN git clone {{.RepoURL}} .
 
 # Descargar dependencias
 RUN go mod download
-
-# Copiar código fuente
-COPY . .
 
 # Compilar aplicación
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o app .
@@ -102,17 +99,17 @@ CMD ["./app"]
 		Template: `# Multi-stage build para Node.js
 FROM node:22-alpine AS builder
 
+# Instalar dependencias del sistema
+RUN apk add --no-cache git
+
 # Configurar directorio de trabajo
 WORKDIR /app
 
-# Copiar package.json y package-lock.json
-COPY package*.json ./
+# Clonar repositorio
+RUN git clone {{.RepoURL}} .
 
 # Instalar dependencias (incluyendo dev)
 RUN npm ci
-
-# Copiar código fuente
-COPY . .
 
 # Compilar aplicación (si aplica)
 RUN npm run build || true
@@ -129,16 +126,11 @@ RUN adduser -D -s /bin/sh appuser
 # Configurar directorio de trabajo
 WORKDIR /app
 
-# Copiar package.json y package-lock.json
-COPY package*.json ./
+# Copiar aplicación desde builder
+COPY --from=builder /app .
 
 # Instalar solo dependencias de producción
 RUN npm ci --only=production && npm cache clean --force
-
-# Copiar aplicación compilada
-COPY --from=builder /app/dist ./dist || true
-COPY --from=builder /app/src ./src || true
-COPY --from=builder /app/public ./public || true
 
 # Cambiar propietario
 RUN chown -R appuser:appuser /app
@@ -167,13 +159,13 @@ CMD ["npm", "start"]
 FROM python:3.13-alpine AS builder
 
 # Instalar dependencias del sistema para compilación
-RUN apk add --no-cache gcc musl-dev libffi-dev
+RUN apk add --no-cache git gcc musl-dev libffi-dev
 
 # Configurar directorio de trabajo
 WORKDIR /app
 
-# Copiar requirements
-COPY requirements*.txt ./
+# Clonar repositorio
+RUN git clone {{.RepoURL}} .
 
 # Instalar dependencias en directorio local
 RUN pip install --user -r requirements.txt
@@ -194,7 +186,7 @@ WORKDIR /app
 COPY --from=builder /root/.local /home/appuser/.local
 
 # Copiar código fuente
-COPY . .
+COPY --from=builder /app .
 
 # Cambiar propietario
 RUN chown -R appuser:appuser /app
@@ -225,23 +217,13 @@ CMD ["python", "app.py"]
 FROM rust:1.83-alpine AS builder
 
 # Instalar dependencias del sistema
-RUN apk add --no-cache musl-dev
+RUN apk add --no-cache git musl-dev
 
 # Configurar directorio de trabajo
 WORKDIR /app
 
-# Copiar Cargo.toml y Cargo.lock
-COPY Cargo.toml Cargo.lock ./
-
-# Crear directorio src con main.rs dummy para cache de dependencias
-RUN mkdir src && echo "fn main() {}" > src/main.rs
-
-# Compilar dependencias
-RUN cargo build --release
-RUN rm src/main.rs
-
-# Copiar código fuente
-COPY src ./src
+# Clonar repositorio
+RUN git clone {{.RepoURL}} .
 
 # Compilar aplicación
 RUN cargo build --release
@@ -259,7 +241,7 @@ RUN adduser -D -s /bin/sh appuser
 WORKDIR /app
 
 # Copiar binario
-COPY --from=builder /app/target/release/app .
+COPY --from=builder /app/target/release/* .
 
 # Cambiar propietario
 RUN chown -R appuser:appuser /app
@@ -288,6 +270,7 @@ FROM ubuntu:22.04
 
 # Instalar dependencias básicas
 RUN apt-get update && apt-get install -y \
+    git \
     curl \
     wget \
     ca-certificates \
@@ -299,8 +282,8 @@ RUN useradd -m -s /bin/bash appuser
 # Configurar directorio de trabajo
 WORKDIR /app
 
-# Copiar aplicación
-COPY . .
+# Clonar repositorio
+RUN git clone {{.RepoURL}} .
 
 # Cambiar propietario
 RUN chown -R appuser:appuser /app
