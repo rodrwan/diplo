@@ -28,7 +28,7 @@ APPS_RESPONSE=$(http_request "GET" "/api/v1/apps")
 echo "Apps response: $APPS_RESPONSE"
 
 echo "🔧 3. Testing unified status..."
-UNIFIED_STATUS=$(http_request "GET" "/api/unified/status")
+UNIFIED_STATUS=$(http_request "GET" "/api/v1/status")
 echo "Unified status: $UNIFIED_STATUS"
 
 echo "🐳 4. Testing Docker status..."

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/pkg/jsonmessage"
@@ -175,29 +174,6 @@ func (d *Client) streamBuildOutputWithID(reader io.Reader, imageID *string) erro
 	}
 
 	return nil
-}
-
-// findImageByTagWithRetry finds an image ID by its tag with retry logic.
-func (d *Client) findImageByTagWithRetry(imageName string, maxRetries int, retryDelay time.Duration) (string, error) {
-	var lastErr error
-
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		logrus.Debugf("Attempt %d/%d: Searching for image %s", attempt, maxRetries, imageName)
-
-		imageID, err := d.findImageByTag(imageName)
-		if err == nil {
-			logrus.Debugf("Found image %s on attempt %d with ID: %s", imageName, attempt, imageID)
-			return imageID, nil
-		}
-
-		lastErr = err
-		if attempt < maxRetries {
-			logrus.Debugf("Image not found on attempt %d, retrying in %v...", attempt, retryDelay)
-			time.Sleep(retryDelay)
-		}
-	}
-
-	return "", fmt.Errorf("failed to find image %s after %d attempts: %w", imageName, maxRetries, lastErr)
 }
 
 // findImageByTag finds an image ID by its tag.

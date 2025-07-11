@@ -27,8 +27,17 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.createAppStmt, err = db.PrepareContext(ctx, CreateApp); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateApp: %w", err)
 	}
+	if q.createAppEnvVarStmt, err = db.PrepareContext(ctx, CreateAppEnvVar); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateAppEnvVar: %w", err)
+	}
+	if q.deleteAllAppEnvVarsStmt, err = db.PrepareContext(ctx, DeleteAllAppEnvVars); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteAllAppEnvVars: %w", err)
+	}
 	if q.deleteAppStmt, err = db.PrepareContext(ctx, DeleteApp); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteApp: %w", err)
+	}
+	if q.deleteAppEnvVarStmt, err = db.PrepareContext(ctx, DeleteAppEnvVar); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteAppEnvVar: %w", err)
 	}
 	if q.getAllAppsStmt, err = db.PrepareContext(ctx, GetAllApps); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAllApps: %w", err)
@@ -39,8 +48,17 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getAppByRepoUrlStmt, err = db.PrepareContext(ctx, GetAppByRepoUrl); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAppByRepoUrl: %w", err)
 	}
+	if q.getAppEnvVarStmt, err = db.PrepareContext(ctx, GetAppEnvVar); err != nil {
+		return nil, fmt.Errorf("error preparing query GetAppEnvVar: %w", err)
+	}
+	if q.getAppEnvVarsStmt, err = db.PrepareContext(ctx, GetAppEnvVars); err != nil {
+		return nil, fmt.Errorf("error preparing query GetAppEnvVars: %w", err)
+	}
 	if q.updateAppStmt, err = db.PrepareContext(ctx, UpdateApp); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateApp: %w", err)
+	}
+	if q.updateAppEnvVarStmt, err = db.PrepareContext(ctx, UpdateAppEnvVar); err != nil {
+		return nil, fmt.Errorf("error preparing query UpdateAppEnvVar: %w", err)
 	}
 	return &q, nil
 }
@@ -52,9 +70,24 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing createAppStmt: %w", cerr)
 		}
 	}
+	if q.createAppEnvVarStmt != nil {
+		if cerr := q.createAppEnvVarStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createAppEnvVarStmt: %w", cerr)
+		}
+	}
+	if q.deleteAllAppEnvVarsStmt != nil {
+		if cerr := q.deleteAllAppEnvVarsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteAllAppEnvVarsStmt: %w", cerr)
+		}
+	}
 	if q.deleteAppStmt != nil {
 		if cerr := q.deleteAppStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteAppStmt: %w", cerr)
+		}
+	}
+	if q.deleteAppEnvVarStmt != nil {
+		if cerr := q.deleteAppEnvVarStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteAppEnvVarStmt: %w", cerr)
 		}
 	}
 	if q.getAllAppsStmt != nil {
@@ -72,9 +105,24 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getAppByRepoUrlStmt: %w", cerr)
 		}
 	}
+	if q.getAppEnvVarStmt != nil {
+		if cerr := q.getAppEnvVarStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getAppEnvVarStmt: %w", cerr)
+		}
+	}
+	if q.getAppEnvVarsStmt != nil {
+		if cerr := q.getAppEnvVarsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getAppEnvVarsStmt: %w", cerr)
+		}
+	}
 	if q.updateAppStmt != nil {
 		if cerr := q.updateAppStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateAppStmt: %w", cerr)
+		}
+	}
+	if q.updateAppEnvVarStmt != nil {
+		if cerr := q.updateAppEnvVarStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing updateAppEnvVarStmt: %w", cerr)
 		}
 	}
 	return err
@@ -114,25 +162,37 @@ func (q *Queries) queryRow(ctx context.Context, stmt *sql.Stmt, query string, ar
 }
 
 type Queries struct {
-	db                  DBTX
-	tx                  *sql.Tx
-	createAppStmt       *sql.Stmt
-	deleteAppStmt       *sql.Stmt
-	getAllAppsStmt      *sql.Stmt
-	getAppStmt          *sql.Stmt
-	getAppByRepoUrlStmt *sql.Stmt
-	updateAppStmt       *sql.Stmt
+	db                      DBTX
+	tx                      *sql.Tx
+	createAppStmt           *sql.Stmt
+	createAppEnvVarStmt     *sql.Stmt
+	deleteAllAppEnvVarsStmt *sql.Stmt
+	deleteAppStmt           *sql.Stmt
+	deleteAppEnvVarStmt     *sql.Stmt
+	getAllAppsStmt          *sql.Stmt
+	getAppStmt              *sql.Stmt
+	getAppByRepoUrlStmt     *sql.Stmt
+	getAppEnvVarStmt        *sql.Stmt
+	getAppEnvVarsStmt       *sql.Stmt
+	updateAppStmt           *sql.Stmt
+	updateAppEnvVarStmt     *sql.Stmt
 }
 
 func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 	return &Queries{
-		db:                  tx,
-		tx:                  tx,
-		createAppStmt:       q.createAppStmt,
-		deleteAppStmt:       q.deleteAppStmt,
-		getAllAppsStmt:      q.getAllAppsStmt,
-		getAppStmt:          q.getAppStmt,
-		getAppByRepoUrlStmt: q.getAppByRepoUrlStmt,
-		updateAppStmt:       q.updateAppStmt,
+		db:                      tx,
+		tx:                      tx,
+		createAppStmt:           q.createAppStmt,
+		createAppEnvVarStmt:     q.createAppEnvVarStmt,
+		deleteAllAppEnvVarsStmt: q.deleteAllAppEnvVarsStmt,
+		deleteAppStmt:           q.deleteAppStmt,
+		deleteAppEnvVarStmt:     q.deleteAppEnvVarStmt,
+		getAllAppsStmt:          q.getAllAppsStmt,
+		getAppStmt:              q.getAppStmt,
+		getAppByRepoUrlStmt:     q.getAppByRepoUrlStmt,
+		getAppEnvVarStmt:        q.getAppEnvVarStmt,
+		getAppEnvVarsStmt:       q.getAppEnvVarsStmt,
+		updateAppStmt:           q.updateAppStmt,
+		updateAppEnvVarStmt:     q.updateAppEnvVarStmt,
 	}
 }

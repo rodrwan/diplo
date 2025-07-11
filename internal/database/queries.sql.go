@@ -44,12 +44,60 @@ func (q *Queries) CreateApp(ctx context.Context, arg CreateAppParams) error {
 	return err
 }
 
+const CreateAppEnvVar = `-- name: CreateAppEnvVar :exec
+INSERT INTO app_env_vars (app_id, key, value, is_secret, updated_at)
+VALUES (?, ?, ?, ?, ?)
+`
+
+type CreateAppEnvVarParams struct {
+	AppID     string       `db:"app_id" json:"app_id"`
+	Key       string       `db:"key" json:"key"`
+	Value     string       `db:"value" json:"value"`
+	IsSecret  sql.NullBool `db:"is_secret" json:"is_secret"`
+	UpdatedAt sql.NullTime `db:"updated_at" json:"updated_at"`
+}
+
+// Environment Variables queries
+func (q *Queries) CreateAppEnvVar(ctx context.Context, arg CreateAppEnvVarParams) error {
+	_, err := q.exec(ctx, q.createAppEnvVarStmt, CreateAppEnvVar,
+		arg.AppID,
+		arg.Key,
+		arg.Value,
+		arg.IsSecret,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const DeleteAllAppEnvVars = `-- name: DeleteAllAppEnvVars :exec
+DELETE FROM app_env_vars WHERE app_id = ?
+`
+
+func (q *Queries) DeleteAllAppEnvVars(ctx context.Context, appID string) error {
+	_, err := q.exec(ctx, q.deleteAllAppEnvVarsStmt, DeleteAllAppEnvVars, appID)
+	return err
+}
+
 const DeleteApp = `-- name: DeleteApp :exec
 DELETE FROM apps WHERE id = ?
 `
 
 func (q *Queries) DeleteApp(ctx context.Context, id string) error {
 	_, err := q.exec(ctx, q.deleteAppStmt, DeleteApp, id)
+	return err
+}
+
+const DeleteAppEnvVar = `-- name: DeleteAppEnvVar :exec
+DELETE FROM app_env_vars WHERE app_id = ? AND key = ?
+`
+
+type DeleteAppEnvVarParams struct {
+	AppID string `db:"app_id" json:"app_id"`
+	Key   string `db:"key" json:"key"`
+}
+
+func (q *Queries) DeleteAppEnvVar(ctx context.Context, arg DeleteAppEnvVarParams) error {
+	_, err := q.exec(ctx, q.deleteAppEnvVarStmt, DeleteAppEnvVar, arg.AppID, arg.Key)
 	return err
 }
 
@@ -140,6 +188,67 @@ func (q *Queries) GetAppByRepoUrl(ctx context.Context, repoUrl string) (App, err
 	return i, err
 }
 
+const GetAppEnvVar = `-- name: GetAppEnvVar :one
+SELECT id, app_id, key, value, is_secret, created_at, updated_at
+FROM app_env_vars WHERE app_id = ? AND key = ?
+`
+
+type GetAppEnvVarParams struct {
+	AppID string `db:"app_id" json:"app_id"`
+	Key   string `db:"key" json:"key"`
+}
+
+func (q *Queries) GetAppEnvVar(ctx context.Context, arg GetAppEnvVarParams) (AppEnvVar, error) {
+	row := q.queryRow(ctx, q.getAppEnvVarStmt, GetAppEnvVar, arg.AppID, arg.Key)
+	var i AppEnvVar
+	err := row.Scan(
+		&i.ID,
+		&i.AppID,
+		&i.Key,
+		&i.Value,
+		&i.IsSecret,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const GetAppEnvVars = `-- name: GetAppEnvVars :many
+SELECT id, app_id, key, value, is_secret, created_at, updated_at
+FROM app_env_vars WHERE app_id = ?
+`
+
+func (q *Queries) GetAppEnvVars(ctx context.Context, appID string) ([]AppEnvVar, error) {
+	rows, err := q.query(ctx, q.getAppEnvVarsStmt, GetAppEnvVars, appID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AppEnvVar{}
+	for rows.Next() {
+		var i AppEnvVar
+		if err := rows.Scan(
+			&i.ID,
+			&i.AppID,
+			&i.Key,
+			&i.Value,
+			&i.IsSecret,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const UpdateApp = `-- name: UpdateApp :exec
 UPDATE apps SET name = ?, repo_url = ?, language = ?, port = ?, container_id = ?, image_id = ?, status = ?, error_msg = ?, updated_at = ? WHERE id = ?
 `
@@ -169,6 +278,29 @@ func (q *Queries) UpdateApp(ctx context.Context, arg UpdateAppParams) error {
 		arg.ErrorMsg,
 		arg.UpdatedAt,
 		arg.ID,
+	)
+	return err
+}
+
+const UpdateAppEnvVar = `-- name: UpdateAppEnvVar :exec
+UPDATE app_env_vars SET value = ?, is_secret = ?, updated_at = ? WHERE app_id = ? AND key = ?
+`
+
+type UpdateAppEnvVarParams struct {
+	Value     string       `db:"value" json:"value"`
+	IsSecret  sql.NullBool `db:"is_secret" json:"is_secret"`
+	UpdatedAt sql.NullTime `db:"updated_at" json:"updated_at"`
+	AppID     string       `db:"app_id" json:"app_id"`
+	Key       string       `db:"key" json:"key"`
+}
+
+func (q *Queries) UpdateAppEnvVar(ctx context.Context, arg UpdateAppEnvVarParams) error {
+	_, err := q.exec(ctx, q.updateAppEnvVarStmt, UpdateAppEnvVar,
+		arg.Value,
+		arg.IsSecret,
+		arg.UpdatedAt,
+		arg.AppID,
+		arg.Key,
 	)
 	return err
 }

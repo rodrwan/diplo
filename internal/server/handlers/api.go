@@ -4,11 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math/rand"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,96 +52,11 @@ func NewHybridContext(docker *docker.Client, queries database.Querier, logChanne
 	}
 }
 
-func DeployHandler(ctx *Context, w http.ResponseWriter, r *http.Request) (Response, error) {
-	var req models.DeployRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		return Response{Code: http.StatusBadRequest, Message: "Invalid JSON"}, err
-	}
+// DeployHandler ha sido DEPRECADO - usa UnifiedDeployHandler que detecta automáticamente el runtime
+// Esta función se mantiene solo para referencia histórica y será eliminada en versiones futuras
 
-	if req.RepoURL == "" {
-		return Response{Code: http.StatusBadRequest, Message: "repo_url is required"}, errors.New("repo_url is required")
-	}
-
-	// Verificar si ya existe una aplicación con este repo_url
-	existingApp, err := ctx.queries.GetAppByRepoUrl(r.Context(), req.RepoURL)
-	if err != nil && err != sql.ErrNoRows {
-		logrus.Errorf("Error verificando aplicación existente: %v", err)
-		return Response{Code: http.StatusInternalServerError, Message: "Error verificando aplicación existente"}, err
-	}
-
-	// Si existe una app con el mismo repo_url, hacer redeploy
-	if err != sql.ErrNoRows {
-		logrus.Infof("App existente encontrada para %s, haciendo redeploy: %s", req.RepoURL, existingApp.ID)
-
-		// Actualizar nombre si se proporcionó uno nuevo
-		if req.Name != "" && req.Name != existingApp.Name {
-			existingApp.Name = req.Name
-		}
-
-		// Iniciar redeploy en background
-		go redeployExistingApp(ctx, &existingApp)
-
-		// Responder inmediatamente
-		response := map[string]any{
-			"id":       existingApp.ID,
-			"name":     existingApp.Name,
-			"repo_url": existingApp.RepoUrl,
-			"port":     existingApp.Port,
-			"url":      fmt.Sprintf("http://localhost:%d", existingApp.Port),
-			"status":   "redeploying",
-			"message":  "Redeploy iniciado para aplicación existente",
-		}
-
-		return Response{Code: http.StatusOK, Data: response}, nil
-	}
-
-	// Si no existe, crear nueva aplicación
-	app := &database.App{
-		ID:      database.GenerateAppID(),
-		Name:    req.Name,
-		RepoUrl: req.RepoURL,
-	}
-
-	// Asignar puerto libre
-	port, err := findFreePort()
-	if err != nil {
-		logrus.Errorf("Error asignando puerto: %v", err)
-		return Response{Code: http.StatusInternalServerError, Message: "No se pudo asignar puerto libre"}, err
-	}
-	app.Port = int64(port)
-
-	// Guardar en base de datos
-	if err := ctx.queries.CreateApp(r.Context(), database.CreateAppParams{
-		ID:       app.ID,
-		Name:     app.Name,
-		RepoUrl:  req.RepoURL,
-		Language: sql.NullString{String: "Go", Valid: true},
-		Port:     int64(port),
-		Status:   database.StatusDeploying,
-	}); err != nil {
-		logrus.Errorf("Error guardando aplicación: %v", err)
-		return Response{Code: http.StatusInternalServerError, Message: "Error guardando aplicación"}, err
-	}
-
-	// Iniciar deployment en background
-	go deployApp(ctx, app)
-
-	// Responder inmediatamente
-	response := map[string]any{
-		"id":       app.ID,
-		"name":     app.Name,
-		"repo_url": app.RepoUrl,
-		"port":     app.Port,
-		"url":      fmt.Sprintf("http://localhost:%d", app.Port),
-		"status":   "deploying",
-		"message":  "Aplicación creada y deployment iniciado",
-	}
-
-	return Response{Code: http.StatusCreated, Data: response}, nil
-}
-
-func deployApp(ctx *Context, app *database.App) {
-	logrus.Infof("Iniciando deployment de: %s (%s)", app.Name, app.ID)
+func deployApp(ctx *Context, app *database.App, envVars []models.EnvVar) {
+	logrus.Infof("Iniciando deployment de: %s (%s) con %d variables de entorno", app.Name, app.ID, len(envVars))
 
 	// Configurar callback específico para esta aplicación
 	originalCallback := ctx.docker.GetEventCallback()
@@ -270,7 +183,7 @@ func deployApp(ctx *Context, app *database.App) {
 	// Ejecutar contenedor
 	logrus.Infof("Ejecutando contenedor en puerto %d", app.Port)
 	sendLogMessage(ctx, app.ID, "info", fmt.Sprintf("Ejecutando contenedor en puerto %d", app.Port))
-	containerID, err := ctx.docker.RunContainer(app, imageTag)
+	containerID, err := ctx.docker.RunContainer(app, imageTag, envVars)
 	if err != nil {
 		logrus.Errorf("Error ejecutando contenedor: %v", err)
 		app.Status = database.StatusError
@@ -419,9 +332,37 @@ func redeployExistingApp(ctx *Context, app *database.App) {
 	}
 	sendLogMessage(ctx, app.ID, "success", "Nueva imagen construida exitosamente")
 
+	// Cargar variables de entorno existentes de la base de datos
+	existingEnvVars, err := ctx.queries.GetAppEnvVars(context.Background(), app.ID)
+	if err != nil {
+		logrus.Warnf("Error cargando variables de entorno para redeploy: %v", err)
+	}
+
+	// Convertir a formato models.EnvVar
+	envVars := make([]models.EnvVar, 0, len(existingEnvVars))
+	for _, env := range existingEnvVars {
+		value := env.Value
+
+		// Descifrar valores secretos para el contenedor
+		if env.IsSecret.Bool {
+			if decryptedValue, err := decryptValue(env.Value); err != nil {
+				logrus.Errorf("Error descifrando valor secreto para contenedor %s: %v", env.Key, err)
+				// Usar valor por defecto o saltar esta variable
+				continue
+			} else {
+				value = decryptedValue
+			}
+		}
+
+		envVars = append(envVars, models.EnvVar{
+			Name:  env.Key,
+			Value: value,
+		})
+	}
+
 	// Ejecutar nuevo contenedor
 	sendLogMessage(ctx, app.ID, "info", fmt.Sprintf("Ejecutando nuevo contenedor en puerto %d", app.Port))
-	containerID, err := ctx.docker.RunContainer(app, imageTag)
+	containerID, err := ctx.docker.RunContainer(app, imageTag, envVars)
 	if err != nil {
 		logrus.Errorf("Error ejecutando contenedor en redeploy: %v", err)
 		handleRedeployError(ctx, app, fmt.Sprintf("Error ejecutando contenedor: %v", err))

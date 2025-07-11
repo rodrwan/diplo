@@ -21,3 +21,13 @@ type App struct {
 	CreatedAt   sql.NullTime   `db:"created_at" json:"created_at"`
 	UpdatedAt   sql.NullTime   `db:"updated_at" json:"updated_at"`
 }
+
+type AppEnvVar struct {
+	ID        int64        `db:"id" json:"id"`
+	AppID     string       `db:"app_id" json:"app_id"`
+	Key       string       `db:"key" json:"key"`
+	Value     string       `db:"value" json:"value"`
+	IsSecret  sql.NullBool `db:"is_secret" json:"is_secret"`
+	CreatedAt sql.NullTime `db:"created_at" json:"created_at"`
+	UpdatedAt sql.NullTime `db:"updated_at" json:"updated_at"`
+}

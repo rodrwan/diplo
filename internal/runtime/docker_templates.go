@@ -356,39 +356,3 @@ func (tm *DockerTemplateManager) RenderTemplate(language string, port int, repoU
 
 	return rendered.String(), nil
 }
-
-// GetSupportedLanguages devuelve la lista de lenguajes soportados
-func (tm *DockerTemplateManager) GetSupportedLanguages() []string {
-	languages := make([]string, 0, len(tm.templates))
-	for lang := range tm.templates {
-		if lang != "generic" {
-			languages = append(languages, lang)
-		}
-	}
-	return languages
-}
-
-// ValidateTemplate valida que un template sea correcto
-func (tm *DockerTemplateManager) ValidateTemplate(language string) error {
-	template, err := tm.GetTemplate(language)
-	if err != nil {
-		return err
-	}
-
-	// Validar que el template tenga los campos necesarios
-	if template.BaseImage == "" {
-		return fmt.Errorf("template para %s no tiene imagen base", language)
-	}
-
-	if template.Template == "" {
-		return fmt.Errorf("template para %s no tiene contenido", language)
-	}
-
-	// Intentar parsear el template
-	_, err = texttemplate.New("test").Parse(template.Template)
-	if err != nil {
-		return fmt.Errorf("template para %s tiene sintaxis inválida: %w", language, err)
-	}
-
-	return nil
-}

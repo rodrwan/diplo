@@ -2,8 +2,11 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -312,4 +315,407 @@ func performHealthCheck(ctx *Context, app *database.App) (map[string]interface{}
 			"timestamp":        time.Now().Format(time.RFC3339),
 		},
 	}, nil
+}
+
+// ListAppEnvVarsHandler obtiene todas las variables de entorno de una aplicación
+func ListAppEnvVarsHandler(ctx *Context, w http.ResponseWriter, r *http.Request) (Response, error) {
+	vars := mux.Vars(r)
+	appID := vars["id"]
+
+	// Verificar que la aplicación existe
+	_, err := ctx.queries.GetApp(r.Context(), appID)
+	if err != nil {
+		logrus.Errorf("Error obteniendo aplicación: %v", err)
+		return Response{Code: http.StatusNotFound, Message: "Aplicación no encontrada"}, err
+	}
+
+	// Obtener variables de entorno
+	envVars, err := ctx.queries.GetAppEnvVars(r.Context(), appID)
+	if err != nil {
+		logrus.Errorf("Error obteniendo variables de entorno: %v", err)
+		return Response{Code: http.StatusInternalServerError, Message: "Error obteniendo variables de entorno"}, err
+	}
+
+	// Convertir a formato de respuesta
+	envVarsResponse := make([]map[string]interface{}, 0, len(envVars))
+	for _, env := range envVars {
+		displayValue := env.Value
+
+		// Descifrar valores secretos para mostrar
+		if env.IsSecret.Bool {
+			if decryptedValue, err := decryptValue(env.Value); err != nil {
+				logrus.Errorf("Error descifrando valor secreto para %s: %v", env.Key, err)
+				displayValue = "[ERROR_DESCIFRANDO]"
+			} else {
+				displayValue = decryptedValue
+			}
+		}
+
+		envVarsResponse = append(envVarsResponse, map[string]interface{}{
+			"id":         env.ID,
+			"key":        env.Key,
+			"value":      displayValue,
+			"is_secret":  env.IsSecret.Bool,
+			"created_at": env.CreatedAt.Time.Format(time.RFC3339),
+			"updated_at": env.UpdatedAt.Time.Format(time.RFC3339),
+		})
+	}
+
+	return Response{Code: http.StatusOK, Data: envVarsResponse}, nil
+}
+
+// GetAppEnvVarHandler obtiene una variable de entorno específica
+func GetAppEnvVarHandler(ctx *Context, w http.ResponseWriter, r *http.Request) (Response, error) {
+	vars := mux.Vars(r)
+	appID := vars["id"]
+	key := vars["key"]
+
+	// Verificar que la aplicación existe
+	_, err := ctx.queries.GetApp(r.Context(), appID)
+	if err != nil {
+		logrus.Errorf("Error obteniendo aplicación: %v", err)
+		return Response{Code: http.StatusNotFound, Message: "Aplicación no encontrada"}, err
+	}
+
+	// Obtener variable de entorno específica
+	envVar, err := ctx.queries.GetAppEnvVar(r.Context(), database.GetAppEnvVarParams{
+		AppID: appID,
+		Key:   key,
+	})
+	if err != nil {
+		logrus.Errorf("Error obteniendo variable de entorno: %v", err)
+		return Response{Code: http.StatusNotFound, Message: "Variable de entorno no encontrada"}, err
+	}
+
+	displayValue := envVar.Value
+
+	// Descifrar valor secreto para mostrar
+	if envVar.IsSecret.Bool {
+		if decryptedValue, err := decryptValue(envVar.Value); err != nil {
+			logrus.Errorf("Error descifrando valor secreto para %s: %v", envVar.Key, err)
+			displayValue = "[ERROR_DESCIFRANDO]"
+		} else {
+			displayValue = decryptedValue
+		}
+	}
+
+	envVarResponse := map[string]interface{}{
+		"id":         envVar.ID,
+		"key":        envVar.Key,
+		"value":      displayValue,
+		"is_secret":  envVar.IsSecret.Bool,
+		"created_at": envVar.CreatedAt.Time.Format(time.RFC3339),
+		"updated_at": envVar.UpdatedAt.Time.Format(time.RFC3339),
+	}
+
+	return Response{Code: http.StatusOK, Data: envVarResponse}, nil
+}
+
+// CreateAppEnvVarHandler crea una nueva variable de entorno para una aplicación
+func CreateAppEnvVarHandler(ctx *Context, w http.ResponseWriter, r *http.Request) (Response, error) {
+	vars := mux.Vars(r)
+	appID := vars["id"]
+
+	// Verificar que la aplicación existe
+	_, err := ctx.queries.GetApp(r.Context(), appID)
+	if err != nil {
+		logrus.Errorf("Error obteniendo aplicación: %v", err)
+		return Response{Code: http.StatusNotFound, Message: "Aplicación no encontrada"}, err
+	}
+
+	// Decodificar request body
+	var req struct {
+		Key      string `json:"key"`
+		Value    string `json:"value"`
+		IsSecret bool   `json:"is_secret"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return Response{Code: http.StatusBadRequest, Message: "JSON inválido"}, err
+	}
+
+	// Validar campos requeridos
+	if req.Key == "" || req.Value == "" {
+		return Response{Code: http.StatusBadRequest, Message: "Los campos 'key' y 'value' son requeridos"}, nil
+	}
+
+	// Validar longitud de campos
+	if len(req.Key) > 100 {
+		return Response{Code: http.StatusBadRequest, Message: "El nombre de la variable no puede exceder 100 caracteres"}, nil
+	}
+	if len(req.Value) > 1000 {
+		return Response{Code: http.StatusBadRequest, Message: "El valor de la variable no puede exceder 1000 caracteres"}, nil
+	}
+
+	// Validar nombre de variable de entorno
+	if !isValidEnvVarName(req.Key) {
+		return Response{Code: http.StatusBadRequest, Message: "Nombre de variable de entorno inválido. Solo se permiten letras, números y guiones bajos"}, nil
+	}
+
+	// Validar valor de variable de entorno
+	if !isValidEnvVarValue(req.Value) {
+		return Response{Code: http.StatusBadRequest, Message: "Valor de variable de entorno contiene caracteres no permitidos"}, nil
+	}
+
+	// Verificar límite de variables de entorno por aplicación
+	existingEnvVars, err := ctx.queries.GetAppEnvVars(r.Context(), appID)
+	if err != nil {
+		logrus.Errorf("Error verificando variables de entorno existentes: %v", err)
+		return Response{Code: http.StatusInternalServerError, Message: "Error verificando variables de entorno"}, err
+	}
+
+	const maxEnvVars = 50 // Límite de 50 variables de entorno por aplicación
+	if len(existingEnvVars) >= maxEnvVars {
+		return Response{Code: http.StatusBadRequest, Message: "Límite máximo de variables de entorno alcanzado (50)"}, nil
+	}
+
+	// Verificar si ya existe una variable con ese nombre
+	_, err = ctx.queries.GetAppEnvVar(r.Context(), database.GetAppEnvVarParams{
+		AppID: appID,
+		Key:   req.Key,
+	})
+	if err == nil {
+		return Response{Code: http.StatusConflict, Message: "Variable de entorno ya existe"}, nil
+	}
+
+	// Cifrar el valor si es marcado como secreto
+	valueToStore := req.Value
+	if shouldEncryptValue(req.IsSecret) {
+		encryptedValue, err := encryptValue(req.Value)
+		if err != nil {
+			logrus.Errorf("Error cifrando valor secreto: %v", err)
+			return Response{Code: http.StatusInternalServerError, Message: "Error procesando valor secreto"}, err
+		}
+		valueToStore = encryptedValue
+	}
+
+	// Crear variable de entorno
+	err = ctx.queries.CreateAppEnvVar(r.Context(), database.CreateAppEnvVarParams{
+		AppID:     appID,
+		Key:       req.Key,
+		Value:     valueToStore,
+		IsSecret:  sql.NullBool{Bool: req.IsSecret, Valid: true},
+		UpdatedAt: sql.NullTime{Time: time.Now(), Valid: true},
+	})
+	if err != nil {
+		logrus.Errorf("Error creando variable de entorno: %v", err)
+		return Response{Code: http.StatusInternalServerError, Message: "Error creando variable de entorno"}, err
+	}
+
+	response := map[string]interface{}{
+		"message": "Variable de entorno creada exitosamente",
+		"key":     req.Key,
+		"app_id":  appID,
+	}
+
+	return Response{Code: http.StatusCreated, Data: response}, nil
+}
+
+// UpdateAppEnvVarHandler actualiza una variable de entorno existente
+func UpdateAppEnvVarHandler(ctx *Context, w http.ResponseWriter, r *http.Request) (Response, error) {
+	vars := mux.Vars(r)
+	appID := vars["id"]
+	key := vars["key"]
+
+	// Verificar que la aplicación existe
+	_, err := ctx.queries.GetApp(r.Context(), appID)
+	if err != nil {
+		logrus.Errorf("Error obteniendo aplicación: %v", err)
+		return Response{Code: http.StatusNotFound, Message: "Aplicación no encontrada"}, err
+	}
+
+	// Verificar que la variable de entorno existe
+	_, err = ctx.queries.GetAppEnvVar(r.Context(), database.GetAppEnvVarParams{
+		AppID: appID,
+		Key:   key,
+	})
+	if err != nil {
+		logrus.Errorf("Error obteniendo variable de entorno: %v", err)
+		return Response{Code: http.StatusNotFound, Message: "Variable de entorno no encontrada"}, err
+	}
+
+	// Decodificar request body
+	var req struct {
+		Value    string `json:"value"`
+		IsSecret bool   `json:"is_secret"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return Response{Code: http.StatusBadRequest, Message: "JSON inválido"}, err
+	}
+
+	// Validar campos requeridos
+	if req.Value == "" {
+		return Response{Code: http.StatusBadRequest, Message: "El campo 'value' es requerido"}, nil
+	}
+
+	// Validar longitud del valor
+	if len(req.Value) > 1000 {
+		return Response{Code: http.StatusBadRequest, Message: "El valor de la variable no puede exceder 1000 caracteres"}, nil
+	}
+
+	// Validar valor de variable de entorno
+	if !isValidEnvVarValue(req.Value) {
+		return Response{Code: http.StatusBadRequest, Message: "Valor de variable de entorno contiene caracteres no permitidos"}, nil
+	}
+
+	// Cifrar el valor si es marcado como secreto
+	valueToStore := req.Value
+	if shouldEncryptValue(req.IsSecret) {
+		encryptedValue, err := encryptValue(req.Value)
+		if err != nil {
+			logrus.Errorf("Error cifrando valor secreto: %v", err)
+			return Response{Code: http.StatusInternalServerError, Message: "Error procesando valor secreto"}, err
+		}
+		valueToStore = encryptedValue
+	}
+
+	// Actualizar variable de entorno
+	err = ctx.queries.UpdateAppEnvVar(r.Context(), database.UpdateAppEnvVarParams{
+		AppID:     appID,
+		Key:       key,
+		Value:     valueToStore,
+		IsSecret:  sql.NullBool{Bool: req.IsSecret, Valid: true},
+		UpdatedAt: sql.NullTime{Time: time.Now(), Valid: true},
+	})
+	if err != nil {
+		logrus.Errorf("Error actualizando variable de entorno: %v", err)
+		return Response{Code: http.StatusInternalServerError, Message: "Error actualizando variable de entorno"}, err
+	}
+
+	response := map[string]interface{}{
+		"message": "Variable de entorno actualizada exitosamente",
+		"key":     key,
+		"app_id":  appID,
+	}
+
+	return Response{Code: http.StatusOK, Data: response}, nil
+}
+
+// DeleteAppEnvVarHandler elimina una variable de entorno específica
+func DeleteAppEnvVarHandler(ctx *Context, w http.ResponseWriter, r *http.Request) (Response, error) {
+	vars := mux.Vars(r)
+	appID := vars["id"]
+	key := vars["key"]
+
+	// Verificar que la aplicación existe
+	_, err := ctx.queries.GetApp(r.Context(), appID)
+	if err != nil {
+		logrus.Errorf("Error obteniendo aplicación: %v", err)
+		return Response{Code: http.StatusNotFound, Message: "Aplicación no encontrada"}, err
+	}
+
+	// Verificar que la variable de entorno existe
+	_, err = ctx.queries.GetAppEnvVar(r.Context(), database.GetAppEnvVarParams{
+		AppID: appID,
+		Key:   key,
+	})
+	if err != nil {
+		logrus.Errorf("Error obteniendo variable de entorno: %v", err)
+		return Response{Code: http.StatusNotFound, Message: "Variable de entorno no encontrada"}, err
+	}
+
+	// Eliminar variable de entorno
+	err = ctx.queries.DeleteAppEnvVar(r.Context(), database.DeleteAppEnvVarParams{
+		AppID: appID,
+		Key:   key,
+	})
+	if err != nil {
+		logrus.Errorf("Error eliminando variable de entorno: %v", err)
+		return Response{Code: http.StatusInternalServerError, Message: "Error eliminando variable de entorno"}, err
+	}
+
+	response := map[string]interface{}{
+		"message": "Variable de entorno eliminada exitosamente",
+		"key":     key,
+		"app_id":  appID,
+	}
+
+	return Response{Code: http.StatusOK, Data: response}, nil
+}
+
+// isValidEnvVarName valida nombres de variables de entorno con validaciones de seguridad mejoradas
+func isValidEnvVarName(name string) bool {
+	if len(name) == 0 || len(name) > 100 {
+		return false
+	}
+
+	// El nombre debe empezar con una letra o guión bajo
+	if !((name[0] >= 'A' && name[0] <= 'Z') || (name[0] >= 'a' && name[0] <= 'z') || name[0] == '_') {
+		return false
+	}
+
+	// Prevenir variables del sistema sean sobrescritas
+	systemVars := []string{
+		"PATH", "HOME", "USER", "SHELL", "TERM", "PWD", "LANG", "LC_ALL",
+		"LD_LIBRARY_PATH", "LD_PRELOAD", "TMPDIR", "TMP", "TEMP",
+	}
+	for _, sysVar := range systemVars {
+		if name == sysVar {
+			return false
+		}
+	}
+
+	// Prevenir variables específicas de Docker y contenedores
+	dockerVars := []string{
+		"HOSTNAME", "DOCKER_HOST", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH",
+		"DOCKER_MACHINE_NAME", "DOCKER_BUILDKIT", "COMPOSE_PROJECT_NAME",
+	}
+	for _, dockerVar := range dockerVars {
+		if name == dockerVar {
+			return false
+		}
+	}
+
+	// Prevenir variables internas de Diplo sean sobrescritas
+	diploVars := []string{"DIPLO_APP_ID", "DIPLO_APP_NAME", "PORT"}
+	for _, diploVar := range diploVars {
+		if name == diploVar {
+			return false
+		}
+	}
+
+	// Prevenir variables que podrían ser usadas para ataques
+	dangerousVars := []string{
+		"LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES",
+		"NODE_OPTIONS", "PYTHONPATH", "RUBYLIB", "PERL5LIB", "CLASSPATH",
+	}
+	for _, dangerousVar := range dangerousVars {
+		if name == dangerousVar {
+			return false
+		}
+	}
+
+	// Validación básica de caracteres (alfanuméricos y guión bajo solamente)
+	for _, char := range name {
+		if !((char >= 'A' && char <= 'Z') || (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '_') {
+			return false
+		}
+	}
+
+	return true
+}
+
+// isValidEnvVarValue valida valores de variables de entorno para prevenir ataques
+func isValidEnvVarValue(value string) bool {
+	if len(value) == 0 || len(value) > 1000 {
+		return false
+	}
+
+	// Caracteres peligrosos que podrían ser usados para inyección
+	dangerousChars := []string{
+		"`", "$", "$(", "${", "&&", "||", ";", "|", "&",
+		"<", ">", ">>", "<<", "\n", "\r", "\t",
+	}
+
+	for _, dangerous := range dangerousChars {
+		if strings.Contains(value, dangerous) {
+			return false
+		}
+	}
+
+	// Prevenir valores que empiecen con caracteres sospechosos
+	if strings.HasPrefix(value, "-") || strings.HasPrefix(value, "/") {
+		return false
+	}
+
+	return true
 }

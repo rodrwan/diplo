@@ -10,11 +10,18 @@ import (
 
 type Querier interface {
 	CreateApp(ctx context.Context, arg CreateAppParams) error
+	// Environment Variables queries
+	CreateAppEnvVar(ctx context.Context, arg CreateAppEnvVarParams) error
+	DeleteAllAppEnvVars(ctx context.Context, appID string) error
 	DeleteApp(ctx context.Context, id string) error
+	DeleteAppEnvVar(ctx context.Context, arg DeleteAppEnvVarParams) error
 	GetAllApps(ctx context.Context) ([]App, error)
 	GetApp(ctx context.Context, id string) (App, error)
 	GetAppByRepoUrl(ctx context.Context, repoUrl string) (App, error)
+	GetAppEnvVar(ctx context.Context, arg GetAppEnvVarParams) (AppEnvVar, error)
+	GetAppEnvVars(ctx context.Context, appID string) ([]AppEnvVar, error)
 	UpdateApp(ctx context.Context, arg UpdateAppParams) error
+	UpdateAppEnvVar(ctx context.Context, arg UpdateAppEnvVarParams) error
 }
 
 var _ Querier = (*Queries)(nil)

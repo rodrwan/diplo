@@ -95,33 +95,39 @@ func (s *Server) setupRoutes() {
 	// Health check
 	s.router.HandleFunc("/health", s.healthHandler).Methods("GET")
 
-	// API routes
+	// API routes - Sistema unificado con detección automática de runtime
 	api := s.router.PathPrefix("/api/v1").Subrouter()
 
+	// Contexto híbrido para deployment inteligente
+	hybridCtx := handlers.NewHybridContext(s.docker, s.queries, s.logChannels, s.runtimeFactory)
+
+	// Endpoints principales con sistema híbrido
+	api.HandleFunc("/status", hybridCtx.ServeHTTP(handlers.UnifiedStatusHandler)).Methods("GET")
+	api.HandleFunc("/deploy", hybridCtx.ServeHTTP(handlers.UnifiedDeployHandler)).Methods("POST")
+
+	// Contexto tradicional para gestión de apps y env vars
 	ctx := handlers.NewContext(s.docker, s.queries, s.logChannels)
 
-	api.HandleFunc("/deploy", ctx.ServeHTTP(handlers.DeployHandler)).Methods("POST")
+	// Endpoints de gestión de aplicaciones
 	api.HandleFunc("/apps", ctx.ServeHTTP(handlers.ListAppsHandler)).Methods("GET")
 	api.HandleFunc("/apps/{id}", ctx.ServeHTTP(handlers.GetAppHandler)).Methods("GET")
 	api.HandleFunc("/apps/{id}", ctx.ServeHTTP(handlers.DeleteAppHandler)).Methods("DELETE")
 	api.HandleFunc("/apps/{id}/health", ctx.ServeHTTP(handlers.HealthCheckHandler)).Methods("GET")
+	// Environment variables endpoints
+	api.HandleFunc("/apps/{id}/env", ctx.ServeHTTP(handlers.ListAppEnvVarsHandler)).Methods("GET")
+	api.HandleFunc("/apps/{id}/env", ctx.ServeHTTP(handlers.CreateAppEnvVarHandler)).Methods("POST")
+	api.HandleFunc("/apps/{id}/env/{key}", ctx.ServeHTTP(handlers.GetAppEnvVarHandler)).Methods("GET")
+	api.HandleFunc("/apps/{id}/env/{key}", ctx.ServeHTTP(handlers.UpdateAppEnvVarHandler)).Methods("PUT")
+	api.HandleFunc("/apps/{id}/env/{key}", ctx.ServeHTTP(handlers.DeleteAppEnvVarHandler)).Methods("DELETE")
 	// Maintenance endpoints
 	api.HandleFunc("/maintenance/prune-images", ctx.ServeHTTP(handlers.PruneImagesHandler)).Methods("POST")
 	// SSE endpoint para logs en tiempo real
 	api.HandleFunc("/apps/{id}/logs", ctx.ServeHTTP(handlers.LogsSSEHandler)).Methods("GET")
 
-	// Sistema híbrido - API endpoints
-	unifiedAPI := s.router.PathPrefix("/api/unified").Subrouter()
-	hybridCtx := handlers.NewHybridContext(s.docker, s.queries, s.logChannels, s.runtimeFactory)
-
-	unifiedAPI.HandleFunc("/status", hybridCtx.ServeHTTP(handlers.UnifiedStatusHandler)).Methods("GET")
-	unifiedAPI.HandleFunc("/deploy", hybridCtx.ServeHTTP(handlers.UnifiedDeployHandler)).Methods("POST")
-
-	// LXC específico - API endpoints
+	// Endpoints específicos de runtime (opcional - para debugging)
 	lxcAPI := s.router.PathPrefix("/api/lxc").Subrouter()
 	lxcAPI.HandleFunc("/status", hybridCtx.ServeHTTP(handlers.HybridLXCStatusHandler)).Methods("GET")
 
-	// Docker específico - API endpoints
 	dockerAPI := s.router.PathPrefix("/api/docker").Subrouter()
 	dockerAPI.HandleFunc("/status", hybridCtx.ServeHTTP(handlers.HybridDockerStatusHandler)).Methods("GET")
 }
@@ -129,7 +135,7 @@ func (s *Server) setupRoutes() {
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
 		if r.Method == "OPTIONS" {

@@ -19,18 +19,6 @@ type DefaultRuntimeFactory struct {
 	mu                sync.RWMutex
 }
 
-// NewRuntimeFactory crea una nueva instancia del factory
-func NewRuntimeFactory() *DefaultRuntimeFactory {
-	factory := &DefaultRuntimeFactory{
-		availableRuntimes: make([]RuntimeType, 0),
-	}
-
-	// Detectar SO y runtimes disponibles
-	factory.detectAvailableRuntimes()
-
-	return factory
-}
-
 // NewDefaultRuntimeFactory creates a new instance of DefaultRuntimeFactory
 func NewDefaultRuntimeFactory() RuntimeFactory {
 	factory := &DefaultRuntimeFactory{}

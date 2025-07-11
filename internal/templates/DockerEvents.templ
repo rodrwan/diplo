@@ -41,7 +41,7 @@ templ DockerEvents() {
     <!-- Formulario de Deployment Mejorado -->
     <div class="deployment-form">
         <h2>⚙️ Configuración de Deployment</h2>
-        
+
         <div class="form-row">
             <div class="form-group">
                 <label for="appName">Nombre de la Aplicación:</label>
@@ -73,6 +73,25 @@ templ DockerEvents() {
                     <option value="rust">Rust</option>
                     <option value="java">Java</option>
                 </select>
+            </div>
+        </div>
+
+        <!-- Variables de Entorno -->
+        <div class="env-vars-section">
+            <h3>🔧 Variables de Entorno</h3>
+            <div class="env-vars-help">
+                <p>Define variables de entorno que estarán disponibles en el contenedor de tu aplicación.</p>
+            </div>
+            <div id="envVarsContainer">
+                <div class="env-var-row">
+                    <input type="text" placeholder="NOMBRE_VARIABLE" class="env-key">
+                    <input type="text" placeholder="valor" class="env-value">
+                    <button onclick="removeEnvVar(this)" class="btn btn-danger btn-sm">❌</button>
+                </div>
+            </div>
+            <div class="env-actions">
+                <button onclick="addEnvVar()" class="btn btn-secondary btn-sm">➕ Agregar Variable</button>
+                <button onclick="clearEnvVars()" class="btn btn-warning btn-sm">🗑️ Limpiar Todo</button>
             </div>
         </div>
 
@@ -226,6 +245,64 @@ templ DockerEvents() {
             font-size: 1.1em;
         }
 
+        /* Estilos para Variables de Entorno */
+        .env-vars-section {
+            margin-top: 30px;
+            padding: 25px;
+            background: #1a1a1a;
+            border-radius: 10px;
+            border: 1px solid #444;
+        }
+        .env-vars-section h3 {
+            color: #ecf0f1;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+        .env-vars-help {
+            margin-bottom: 20px;
+            padding: 10px;
+            background: #2d2d2d;
+            border-radius: 5px;
+            border-left: 4px solid #3498db;
+        }
+        .env-vars-help p {
+            color: #bdc3c7;
+            margin: 0;
+            font-size: 0.9em;
+        }
+        .env-var-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr auto;
+            gap: 10px;
+            margin-bottom: 10px;
+            align-items: center;
+        }
+        .env-key, .env-value {
+            padding: 8px 12px;
+            border: 1px solid #444;
+            border-radius: 5px;
+            background: #2d2d2d;
+            color: #e0e0e0;
+            font-size: 14px;
+        }
+        .env-key {
+            font-family: 'Courier New', monospace;
+            text-transform: uppercase;
+        }
+        .env-key:focus, .env-value:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+        .env-actions {
+            margin-top: 15px;
+            text-align: center;
+        }
+        .env-actions .btn {
+            margin: 0 5px;
+            padding: 8px 15px;
+            font-size: 0.9em;
+        }
+
         .logs-section {
             background: #1a1a1a;
             border-radius: 15px;
@@ -334,14 +411,14 @@ templ DockerEvents() {
                 const response = await fetch('/api/unified/status');
                 const data = await response.json();
                 systemStatus = data.data;
-                
+
                 document.getElementById('preferredRuntime').textContent = systemStatus.runtime.preferred || 'N/A';
                 document.getElementById('availableRuntimes').textContent = systemStatus.runtime.available.join(', ') || 'N/A';
                 document.getElementById('supportedLanguages').textContent = systemStatus.runtime.supported_languages.join(', ') || 'N/A';
-                
+
                 // Actualizar opciones de runtime basado en disponibilidad
                 updateRuntimeOptions(systemStatus.runtime.available);
-                
+
                 addLogEntry('✅ Estado del sistema cargado', 'success');
             } catch (error) {
                 console.error('Error cargando estado del sistema:', error);
@@ -353,11 +430,11 @@ templ DockerEvents() {
         function updateRuntimeOptions(availableRuntimes) {
             const select = document.getElementById('runtimeType');
             const options = select.getElementsByTagName('option');
-            
+
             for (let i = 1; i < options.length; i++) {
                 const option = options[i];
                 const runtimeType = option.value;
-                
+
                 if (availableRuntimes.includes(runtimeType)) {
                     option.disabled = false;
                     option.textContent = option.textContent.replace(' (No disponible)', '');
@@ -375,9 +452,9 @@ templ DockerEvents() {
                 addLogEntry('❌ Por favor ingresa una URL de repositorio', 'error');
                 return;
             }
-            
+
             addLogEntry('🔍 Validando repositorio...', 'info');
-            
+
             try {
                 // Simulación de validación (aquí podrías hacer una llamada real)
                 await new Promise(resolve => setTimeout(resolve, 1000));
@@ -499,12 +576,61 @@ templ DockerEvents() {
             addLogEntry('🔌 Conexión SSE cerrada', 'info');
         }
 
+        // Funciones para Variables de Entorno
+        function addEnvVar() {
+            const container = document.getElementById('envVarsContainer');
+            const row = document.createElement('div');
+            row.className = 'env-var-row';
+            row.innerHTML = `
+                <input type="text" placeholder="NOMBRE_VARIABLE" class="env-key">
+                <input type="text" placeholder="valor" class="env-value">
+                <button onclick="removeEnvVar(this)" class="btn btn-danger btn-sm">❌</button>
+            `;
+            container.appendChild(row);
+        }
+
+        function removeEnvVar(button) {
+            const row = button.parentElement;
+            row.remove();
+        }
+
+        function clearEnvVars() {
+            const container = document.getElementById('envVarsContainer');
+            container.innerHTML = `
+                <div class="env-var-row">
+                    <input type="text" placeholder="NOMBRE_VARIABLE" class="env-key">
+                    <input type="text" placeholder="valor" class="env-value">
+                    <button onclick="removeEnvVar(this)" class="btn btn-danger btn-sm">❌</button>
+                </div>
+            `;
+        }
+
+        function getEnvVars() {
+            const rows = document.querySelectorAll('.env-var-row');
+            const envVars = [];
+
+            rows.forEach(row => {
+                const key = row.querySelector('.env-key').value.trim();
+                const value = row.querySelector('.env-value').value.trim();
+
+                if (key && value) {
+                    envVars.push({
+                        name: key,
+                        value: value
+                    });
+                }
+            });
+
+            return envVars;
+        }
+
         // Iniciar deployment
         async function startDeployment() {
             const appName = document.getElementById('appName').value;
             const repoUrl = document.getElementById('repoUrl').value;
             const runtimeType = document.getElementById('runtimeType').value;
             const languageHint = document.getElementById('languageHint').value;
+            const envVars = getEnvVars();
 
             if (!appName || !repoUrl) {
                 addLogEntry('❌ Por favor completa todos los campos requeridos', 'error');
@@ -516,11 +642,15 @@ templ DockerEvents() {
             deployBtn.textContent = '🔄 Deployando...';
 
             addLogEntry('🚀 Iniciando deployment...', 'info');
+            if (envVars.length > 0) {
+                addLogEntry(`🔧 Variables de entorno configuradas: ${envVars.length}`, 'info');
+            }
 
             try {
                 const payload = {
                     name: appName,
-                    repo_url: repoUrl
+                    repo_url: repoUrl,
+                    env_vars: envVars
                 };
 
                 if (runtimeType) {
@@ -531,7 +661,7 @@ templ DockerEvents() {
                     payload.language = languageHint;
                 }
 
-                const response = await fetch('/api/unified/deploy', {
+                const response = await fetch('/api/v1/deploy', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -545,7 +675,10 @@ templ DockerEvents() {
                     currentAppId = result.data.id;
                     addLogEntry(`✅ Deployment iniciado: ${result.data.id}`, 'success');
                     addLogEntry(`🎯 Runtime seleccionado: ${result.data.runtime_type}`, 'info');
-                    
+                    if (result.data.env_vars > 0) {
+                        addLogEntry(`🔧 Variables de entorno aplicadas: ${result.data.env_vars}`, 'success');
+                    }
+
                     // Auto-conectar SSE
                     setTimeout(() => {
                         connectSSE();

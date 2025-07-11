@@ -49,6 +49,78 @@ templ AppsManager() {
         </button>
     </div>
 
+    <!-- Modal para vista detallada de aplicación -->
+    <div class="app-details-modal" id="appDetailsModal">
+        <div class="app-details-content">
+            <div class="app-details-header">
+                <h3 id="appDetailsTitle">Detalles de Aplicación</h3>
+                <button class="close-btn" onclick="closeAppDetailsModal()">&times;</button>
+            </div>
+            <div class="app-details-body">
+                <div class="details-tabs">
+                    <button class="tab-button active" onclick="showDetailsTab('general')">📋 General</button>
+                    <button class="tab-button" onclick="showDetailsTab('env')">🔧 Variables de Entorno</button>
+                    <button class="tab-button" onclick="showDetailsTab('logs')">📜 Logs</button>
+                </div>
+                <div class="details-content">
+                    <div id="generalTab" class="tab-content active">
+                        <div class="app-details-grid" id="appDetailsGrid">
+                            <!-- Se llena dinámicamente -->
+                        </div>
+                    </div>
+                    <div id="envTab" class="tab-content">
+                        <div class="env-vars-management">
+                            <div class="env-vars-actions">
+                                <button onclick="showAddEnvVarForm()" class="btn btn-primary">➕ Agregar Variable</button>
+                                <button onclick="refreshEnvVars()" class="btn btn-secondary">🔄 Actualizar</button>
+                            </div>
+                            <div class="env-vars-list" id="envVarsList">
+                                <!-- Se llena dinámicamente -->
+                            </div>
+                        </div>
+                    </div>
+                    <div id="logsTab" class="tab-content">
+                        <div class="logs-container" id="detailsLogsContainer">
+                            <div class="log-entry log-info">Conectando a los logs...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal para agregar/editar variable de entorno -->
+    <div class="env-var-modal" id="envVarModal">
+        <div class="env-var-modal-content">
+            <div class="env-var-modal-header">
+                <h3 id="envVarModalTitle">Agregar Variable de Entorno</h3>
+                <button class="close-btn" onclick="closeEnvVarModal()">&times;</button>
+            </div>
+            <div class="env-var-modal-body">
+                <form id="envVarForm">
+                    <div class="form-group">
+                        <label for="envVarKey">Nombre de la Variable:</label>
+                        <input type="text" id="envVarKey" placeholder="MI_VARIABLE" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="envVarValue">Valor:</label>
+                        <input type="text" id="envVarValue" placeholder="mi_valor" required>
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="envVarIsSecret">
+                            Marcar como secreto
+                        </label>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">💾 Guardar</button>
+                        <button type="button" onclick="closeEnvVarModal()" class="btn btn-secondary">❌ Cancelar</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <!-- Menú de mantenimiento -->
     <div class="maintenance-menu" id="maintenanceMenu">
         <div class="maintenance-content">
@@ -335,6 +407,210 @@ templ AppsManager() {
             background: #f39c12;
             color: #2c3e50;
         }
+
+        /* Estilos para el modal de detalles de aplicación */
+        .app-details-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.9);
+            z-index: 1000;
+        }
+        .app-details-content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 90%;
+            max-width: 900px;
+            height: 80%;
+            background: #1a1a1a;
+            border-radius: 15px;
+            overflow: hidden;
+            border: 1px solid #444;
+        }
+        .app-details-header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: #ecf0f1;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .app-details-body {
+            height: calc(100% - 80px);
+            display: flex;
+            flex-direction: column;
+        }
+        .details-tabs {
+            display: flex;
+            background: #2d2d2d;
+            border-bottom: 1px solid #444;
+        }
+        .tab-button {
+            flex: 1;
+            padding: 15px 20px;
+            background: transparent;
+            border: none;
+            color: #bdc3c7;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            border-bottom: 3px solid transparent;
+        }
+        .tab-button.active {
+            color: #3498db;
+            border-bottom-color: #3498db;
+            background: #1a1a1a;
+        }
+        .tab-button:hover {
+            background: #333;
+        }
+        .details-content {
+            flex: 1;
+            overflow: hidden;
+        }
+        .tab-content {
+            display: none;
+            height: 100%;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .app-details-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .detail-section {
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid #444;
+        }
+        .detail-section h4 {
+            color: #3498db;
+            margin-bottom: 15px;
+            font-size: 1.1em;
+        }
+        .env-vars-management {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+        .env-vars-actions {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        .env-vars-list {
+            flex: 1;
+            overflow-y: auto;
+        }
+        .env-var-item {
+            background: #2d2d2d;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #444;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .env-var-info {
+            flex: 1;
+        }
+        .env-var-key {
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            color: #3498db;
+            font-size: 14px;
+        }
+        .env-var-value {
+            font-family: 'Courier New', monospace;
+            color: #ecf0f1;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+        .env-var-secret {
+            color: #f39c12;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .env-var-actions {
+            display: flex;
+            gap: 5px;
+        }
+
+        /* Estilos para el modal de variables de entorno */
+        .env-var-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.9);
+            z-index: 1100;
+            justify-content: center;
+            align-items: center;
+        }
+        .env-var-modal-content {
+            background: #2d2d2d;
+            padding: 30px;
+            border-radius: 15px;
+            border: 1px solid #444;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.7);
+            width: 90%;
+            max-width: 500px;
+        }
+        .env-var-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #444;
+        }
+        .env-var-modal-header h3 {
+            color: #ecf0f1;
+            font-size: 1.3em;
+        }
+        .env-var-modal-body .form-group {
+            margin-bottom: 20px;
+        }
+        .env-var-modal-body label {
+            display: block;
+            margin-bottom: 5px;
+            color: #bdc3c7;
+            font-weight: 500;
+        }
+        .env-var-modal-body input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #444;
+            border-radius: 5px;
+            background: #1a1a1a;
+            color: #ecf0f1;
+            font-size: 14px;
+        }
+        .env-var-modal-body input[type="text"]:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+        .env-var-modal-body input[type="checkbox"] {
+            margin-right: 8px;
+        }
+        .form-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
     </style>
 
     <script>
@@ -449,6 +725,7 @@ templ AppsManager() {
                     </div>
                     <div class="app-actions">
                         ${appUrl}
+                        <button onclick="viewAppDetails('${app.id}')" class="btn btn-info">🔍 Ver Detalles</button>
                         <button onclick="viewLogs('${app.id}', '${app.name}')" class="btn btn-secondary">📋 Logs</button>
                         <button onclick="checkHealth('${app.id}')" class="btn btn-success">🔍 Health Check</button>
                         <button onclick="redeployApp('${app.id}')" class="btn btn-warning">🔄 Redeploy</button>
@@ -609,13 +886,13 @@ templ AppsManager() {
                 }
 
                 const healthData = await response.json();
-                
+
                 if (healthData.data.healthy) {
                     showNotification(`✅ Aplicación saludable (${healthData.data.details.http_status_code})`, 'success');
                 } else {
                     const status = healthData.data.status;
                     const message = healthData.data.message;
-                    
+
                     if (status === 'container_not_running') {
                         showNotification(`⚠️ Contenedor no está ejecutándose: ${message}`, 'warning');
                     } else if (status === 'connection_error') {
@@ -772,6 +1049,318 @@ templ AppsManager() {
             if (event.key === 'Escape') {
                 closeLogsModal();
                 closeMaintenanceMenu();
+                closeAppDetailsModal();
+                closeEnvVarModal();
+            }
+        });
+
+        // Variables globales para la vista detallada
+        let currentAppDetails = null;
+        let currentAppEnvVars = [];
+        let currentEditingEnvVar = null;
+        let detailsEventSource = null;
+
+        // Función para ver detalles de aplicación
+        function viewAppDetails(appId) {
+            currentAppDetails = apps.data.find(app => app.id === appId);
+            if (!currentAppDetails) {
+                showNotification('Aplicación no encontrada', 'error');
+                return;
+            }
+
+            document.getElementById('appDetailsTitle').textContent = `${currentAppDetails.name} - Detalles`;
+            document.getElementById('appDetailsModal').style.display = 'block';
+
+            // Mostrar pestaña general por defecto
+            showDetailsTab('general');
+            loadAppGeneralDetails();
+        }
+
+        // Función para cambiar pestañas
+        function showDetailsTab(tabName) {
+            // Ocultar todas las pestañas
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.tab-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+
+            // Mostrar la pestaña seleccionada
+            document.getElementById(tabName + 'Tab').classList.add('active');
+            document.querySelector(`[onclick="showDetailsTab('${tabName}')"]`).classList.add('active');
+
+            // Cargar contenido específico de la pestaña
+            if (tabName === 'general') {
+                loadAppGeneralDetails();
+            } else if (tabName === 'env') {
+                loadAppEnvVars();
+            } else if (tabName === 'logs') {
+                loadAppLogsInDetails();
+            }
+        }
+
+        // Función para cargar detalles generales
+        function loadAppGeneralDetails() {
+            const grid = document.getElementById('appDetailsGrid');
+            grid.innerHTML = `
+                <div class="detail-section">
+                    <h4>📋 Información General</h4>
+                    <div class="detail-row">
+                        <span class="detail-label">ID:</span>
+                        <span class="detail-value">${currentAppDetails.id}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Nombre:</span>
+                        <span class="detail-value">${currentAppDetails.name}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Estado:</span>
+                        <span class="detail-value status-${currentAppDetails.status}">${getStatusText(currentAppDetails.status)}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Lenguaje:</span>
+                        <span class="detail-value">${currentAppDetails.language || 'N/A'}</span>
+                    </div>
+                </div>
+                <div class="detail-section">
+                    <h4>🌐 Configuración de Red</h4>
+                    <div class="detail-row">
+                        <span class="detail-label">Puerto:</span>
+                        <span class="detail-value">${currentAppDetails.port}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">URL:</span>
+                        <span class="detail-value">
+                            <a href="http://localhost:${currentAppDetails.port}" target="_blank">
+                                http://localhost:${currentAppDetails.port}
+                            </a>
+                        </span>
+                    </div>
+                </div>
+                <div class="detail-section">
+                    <h4>🐳 Información del Contenedor</h4>
+                    <div class="detail-row">
+                        <span class="detail-label">Container ID:</span>
+                        <span class="detail-value">${currentAppDetails.container_id || 'N/A'}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Image ID:</span>
+                        <span class="detail-value">${currentAppDetails.image_id || 'N/A'}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Runtime:</span>
+                        <span class="detail-value">${currentAppDetails.runtime_type || 'Docker'}</span>
+                    </div>
+                </div>
+                <div class="detail-section">
+                    <h4>📂 Repositorio</h4>
+                    <div class="detail-row">
+                        <span class="detail-label">URL:</span>
+                        <span class="detail-value">
+                            <a href="${currentAppDetails.repo_url}" target="_blank">
+                                ${currentAppDetails.repo_url}
+                            </a>
+                        </span>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Función para cargar variables de entorno
+        async function loadAppEnvVars() {
+            try {
+                const response = await fetch(`/api/v1/apps/${currentAppDetails.id}/env`);
+                if (response.ok) {
+                    currentAppEnvVars = await response.json();
+                    renderEnvVarsList();
+                } else {
+                    showNotification('Error cargando variables de entorno', 'error');
+                }
+            } catch (error) {
+                showNotification('Error de conexión', 'error');
+            }
+        }
+
+        // Función para renderizar la lista de variables de entorno
+        function renderEnvVarsList() {
+            const container = document.getElementById('envVarsList');
+
+            if (currentAppEnvVars.data.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <p>No hay variables de entorno configuradas.</p>
+                        <p>Usa el botón "Agregar Variable" para crear una nueva.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = currentAppEnvVars.data.map(envVar => `
+                <div class="env-var-item">
+                    <div class="env-var-info">
+                        <div class="env-var-key">${envVar.key}</div>
+                        <div class="env-var-value">${envVar.is_secret ? '••••••••' : envVar.value}</div>
+                        ${envVar.is_secret ? '<div class="env-var-secret">🔒 SECRETO</div>' : ''}
+                    </div>
+                    <div class="env-var-actions">
+                        <button onclick="editEnvVar('${envVar.key}')" class="btn btn-sm btn-secondary">✏️</button>
+                        <button onclick="deleteEnvVar('${envVar.key}')" class="btn btn-sm btn-danger">🗑️</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Función para cargar logs en la vista detallada
+        function loadAppLogsInDetails() {
+            const container = document.getElementById('detailsLogsContainer');
+            container.innerHTML = '<div class="log-entry log-info">Conectando a los logs...</div>';
+
+            if (detailsEventSource) {
+                detailsEventSource.close();
+            }
+
+            detailsEventSource = new EventSource(`/api/v1/apps/${currentAppDetails.id}/logs`);
+
+            detailsEventSource.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    addLogEntryToDetails(data.message, data.type);
+                } catch (error) {
+                    addLogEntryToDetails(`Error parseando evento: ${error.message}`, 'error');
+                }
+            };
+
+            detailsEventSource.onerror = function() {
+                addLogEntryToDetails('Error en la conexión SSE', 'error');
+            };
+        }
+
+        // Función para agregar entrada de log en detalles
+        function addLogEntryToDetails(message, type = 'info') {
+            const container = document.getElementById('detailsLogsContainer');
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+
+            const timestamp = new Date().toLocaleTimeString();
+            entry.textContent = `[${timestamp}] ${message}`;
+
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        // Función para mostrar formulario de agregar variable de entorno
+        function showAddEnvVarForm() {
+            currentEditingEnvVar = null;
+            document.getElementById('envVarModalTitle').textContent = 'Agregar Variable de Entorno';
+            document.getElementById('envVarKey').value = '';
+            document.getElementById('envVarValue').value = '';
+            document.getElementById('envVarIsSecret').checked = false;
+            document.getElementById('envVarKey').disabled = false;
+            document.getElementById('envVarModal').style.display = 'flex';
+        }
+
+        // Función para editar variable de entorno
+        function editEnvVar(key) {
+            const envVar = currentAppEnvVars.data.find(env => env.key === key);
+            if (!envVar) return;
+
+            currentEditingEnvVar = key;
+            document.getElementById('envVarModalTitle').textContent = 'Editar Variable de Entorno';
+            document.getElementById('envVarKey').value = envVar.key;
+            document.getElementById('envVarValue').value = envVar.value;
+            document.getElementById('envVarIsSecret').checked = envVar.is_secret;
+            document.getElementById('envVarKey').disabled = true;
+            document.getElementById('envVarModal').style.display = 'flex';
+        }
+
+        // Función para eliminar variable de entorno
+        async function deleteEnvVar(key) {
+            if (!confirm(`¿Estás seguro de que quieres eliminar la variable "${key}"?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/v1/apps/${currentAppDetails.id}/env/${key}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    showNotification('Variable de entorno eliminada', 'success');
+                    loadAppEnvVars();
+                } else {
+                    const error = await response.json();
+                    showNotification(`Error: ${error.message}`, 'error');
+                }
+            } catch (error) {
+                showNotification('Error de conexión', 'error');
+            }
+        }
+
+        // Función para actualizar variables de entorno
+        function refreshEnvVars() {
+            loadAppEnvVars();
+        }
+
+        // Función para cerrar modal de detalles
+        function closeAppDetailsModal() {
+            document.getElementById('appDetailsModal').style.display = 'none';
+            if (detailsEventSource) {
+                detailsEventSource.close();
+                detailsEventSource = null;
+            }
+            currentAppDetails = null;
+            currentAppEnvVars = [];
+        }
+
+        // Función para cerrar modal de variable de entorno
+        function closeEnvVarModal() {
+            document.getElementById('envVarModal').style.display = 'none';
+            currentEditingEnvVar = null;
+        }
+
+        // Manejar envío del formulario de variable de entorno
+        document.getElementById('envVarForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const key = document.getElementById('envVarKey').value.trim();
+            const value = document.getElementById('envVarValue').value.trim();
+            const isSecret = document.getElementById('envVarIsSecret').checked;
+
+            if (!key || !value) {
+                showNotification('Todos los campos son requeridos', 'error');
+                return;
+            }
+
+            try {
+                const isEditing = currentEditingEnvVar !== null;
+                const url = isEditing
+                    ? `/api/v1/apps/${currentAppDetails.id}/env/${key}`
+                    : `/api/v1/apps/${currentAppDetails.id}/env`;
+
+                const method = isEditing ? 'PUT' : 'POST';
+                const payload = isEditing
+                    ? { value: value, is_secret: isSecret }
+                    : { key: key, value: value, is_secret: isSecret };
+
+                const response = await fetch(url, {
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.ok) {
+                    showNotification(isEditing ? 'Variable actualizada' : 'Variable creada', 'success');
+                    closeEnvVarModal();
+                    loadAppEnvVars();
+                } else {
+                    const error = await response.json();
+                    showNotification(`Error: ${error.message}`, 'error');
+                }
+            } catch (error) {
+                showNotification('Error de conexión', 'error');
             }
         });
     </script>

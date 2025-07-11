@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/rodrwan/diplo/internal/database"
@@ -76,6 +78,71 @@ func UnifiedDeployHandler(ctx *HybridContext, w http.ResponseWriter, r *http.Req
 			existingApp.Name = req.Name
 		}
 
+		// Actualizar variables de entorno si se proporcionaron
+		if len(req.EnvVars) > 0 {
+			// Eliminar variables existentes una por una (no existe DeleteAppEnvVars)
+			existingEnvVars, err := ctx.queries.GetAppEnvVars(r.Context(), existingApp.ID)
+			if err == nil {
+				for _, existing := range existingEnvVars {
+					if err := ctx.queries.DeleteAppEnvVar(r.Context(), database.DeleteAppEnvVarParams{
+						AppID: existingApp.ID,
+						Key:   existing.Key,
+					}); err != nil {
+						logrus.Errorf("Error eliminando variable de entorno existente %s: %v", existing.Key, err)
+					}
+				}
+			}
+
+			// Guardar nuevas variables de entorno
+			for _, envVar := range req.EnvVars {
+				// Validar nombre de variable
+				if !isValidEnvVarName(envVar.Name) {
+					logrus.Errorf("Nombre de variable de entorno inválido: %s", envVar.Name)
+					continue
+				}
+
+				// Validar valor de variable
+				if !isValidEnvVarValue(envVar.Value) {
+					logrus.Errorf("Valor de variable de entorno inválido para %s", envVar.Name)
+					continue
+				}
+
+				value := envVar.Value
+				isSecret := false
+
+				// Determinar si es una variable secreta basándose en palabras clave
+				secretKeywords := []string{"password", "secret", "key", "token", "api_key", "private"}
+				lowerName := strings.ToLower(envVar.Name)
+				lowerValue := strings.ToLower(envVar.Value)
+
+				for _, keyword := range secretKeywords {
+					if strings.Contains(lowerName, keyword) || strings.Contains(lowerValue, keyword) {
+						isSecret = true
+						break
+					}
+				}
+
+				// Cifrar si es secreto
+				if shouldEncryptValue(isSecret) {
+					if encryptedValue, err := encryptValue(envVar.Value); err != nil {
+						logrus.Errorf("Error cifrando variable secreta %s: %v", envVar.Name, err)
+						continue
+					} else {
+						value = encryptedValue
+					}
+				}
+
+				if err := ctx.queries.CreateAppEnvVar(r.Context(), database.CreateAppEnvVarParams{
+					AppID:    existingApp.ID,
+					Key:      envVar.Name,
+					Value:    value,
+					IsSecret: sql.NullBool{Bool: isSecret, Valid: true},
+				}); err != nil {
+					logrus.Errorf("Error guardando variable de entorno %s: %v", envVar.Name, err)
+				}
+			}
+		}
+
 		// Iniciar redeploy en background usando runtime factory
 		go unifiedRedeployApp(ctx, &existingApp, factory)
 
@@ -140,8 +207,59 @@ func UnifiedDeployHandler(ctx *HybridContext, w http.ResponseWriter, r *http.Req
 		return Response{Code: http.StatusInternalServerError, Message: "Error guardando aplicación"}, err
 	}
 
+	// Guardar variables de entorno si se proporcionaron
+	if len(req.EnvVars) > 0 {
+		for _, envVar := range req.EnvVars {
+			// Validar nombre de variable
+			if !isValidEnvVarName(envVar.Name) {
+				logrus.Errorf("Nombre de variable de entorno inválido: %s", envVar.Name)
+				continue
+			}
+
+			// Validar valor de variable
+			if !isValidEnvVarValue(envVar.Value) {
+				logrus.Errorf("Valor de variable de entorno inválido para %s", envVar.Name)
+				continue
+			}
+
+			value := envVar.Value
+			isSecret := false
+
+			// Determinar si es una variable secreta basándose en palabras clave
+			secretKeywords := []string{"password", "secret", "key", "token", "api_key", "private"}
+			lowerName := strings.ToLower(envVar.Name)
+			lowerValue := strings.ToLower(envVar.Value)
+
+			for _, keyword := range secretKeywords {
+				if strings.Contains(lowerName, keyword) || strings.Contains(lowerValue, keyword) {
+					isSecret = true
+					break
+				}
+			}
+
+			// Cifrar si es secreto
+			if shouldEncryptValue(isSecret) {
+				if encryptedValue, err := encryptValue(envVar.Value); err != nil {
+					logrus.Errorf("Error cifrando variable secreta %s: %v", envVar.Name, err)
+					continue
+				} else {
+					value = encryptedValue
+				}
+			}
+
+			if err := ctx.queries.CreateAppEnvVar(r.Context(), database.CreateAppEnvVarParams{
+				AppID:    app.ID,
+				Key:      envVar.Name,
+				Value:    value,
+				IsSecret: sql.NullBool{Bool: isSecret, Valid: true},
+			}); err != nil {
+				logrus.Errorf("Error guardando variable de entorno %s: %v", envVar.Name, err)
+			}
+		}
+	}
+
 	// Iniciar deployment en background usando runtime factory
-	go unifiedDeployApp(ctx, app, factory, selectedRuntime)
+	go unifiedDeployApp(ctx, app, factory)
 
 	// Responder inmediatamente
 	response := map[string]interface{}{
@@ -229,9 +347,6 @@ func HybridDockerStatusHandler(ctx *HybridContext, w http.ResponseWriter, r *htt
 }
 
 // Helper functions
-func generateSimpleID() string {
-	return "app-" + time.Now().Format("20060102150405")
-}
 
 func getSupportedImages(runtimeType runtimePkg.RuntimeType) []string {
 	switch runtimeType {
@@ -247,21 +362,46 @@ func getSupportedImages(runtimeType runtimePkg.RuntimeType) []string {
 }
 
 // unifiedDeployApp ejecuta el deployment usando el runtime factory
-func unifiedDeployApp(ctx *HybridContext, app *database.App, factory runtimePkg.RuntimeFactory, selectedRuntime runtimePkg.RuntimeType) {
+func unifiedDeployApp(ctx *HybridContext, app *database.App, factory runtimePkg.RuntimeFactory) {
+	// Obtener runtime preferido del factory
+	selectedRuntime := factory.GetPreferredRuntime()
 	logrus.Infof("Iniciando deployment unificado de: %s (%s) con runtime %s", app.Name, app.ID, selectedRuntime)
 
-	// Si el runtime seleccionado es Docker, usar el sistema Docker existente
-	if selectedRuntime == runtimePkg.RuntimeTypeDocker {
-		// Convertir HybridContext a Context regular para usar deployApp existente
-		regularCtx := ctx.Context
-		deployApp(regularCtx, app)
-		return
+	// Cargar variables de entorno de la base de datos
+	existingEnvVars, err := ctx.queries.GetAppEnvVars(context.Background(), app.ID)
+	if err != nil {
+		logrus.Warnf("Error cargando variables de entorno para deployment: %v", err)
 	}
 
-	// Para otros runtimes, implementar lógica específica
-	logrus.Infof("Runtime %s no tiene implementación específica, usando Docker como fallback", selectedRuntime)
+	// Convertir a formato models.EnvVar
+	envVars := make([]models.EnvVar, 0, len(existingEnvVars))
+	for _, env := range existingEnvVars {
+		value := env.Value
+
+		// Descifrar valores secretos para el contenedor
+		if env.IsSecret.Bool {
+			if decryptedValue, err := decryptValue(env.Value); err != nil {
+				logrus.Errorf("Error descifrando valor secreto para contenedor %s: %v", env.Key, err)
+				// Usar valor por defecto o saltar esta variable
+				continue
+			} else {
+				value = decryptedValue
+			}
+		}
+
+		envVars = append(envVars, models.EnvVar{
+			Name:  env.Key,
+			Value: value,
+		})
+	}
+
+	// Convertir HybridContext a Context regular para usar deployApp existente
 	regularCtx := ctx.Context
-	deployApp(regularCtx, app)
+
+	// Por ahora todos los runtimes usan el sistema Docker como backend
+	// En el futuro aquí se podría agregar lógica específica por runtime
+	logrus.Infof("Usando sistema Docker para runtime %s", selectedRuntime)
+	deployApp(regularCtx, app, envVars)
 }
 
 // unifiedRedeployApp ejecuta el redeploy usando el runtime factory
