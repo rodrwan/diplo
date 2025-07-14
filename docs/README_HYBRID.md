@@ -175,7 +175,7 @@ Similar a Docker pero optimizado para containerd con namespaces específicos.
 
 #### Endpoints Principales:
 
-##### `GET /api/unified/status`
+##### `GET /api/status`
 Estado completo del sistema híbrido:
 
 ```json
@@ -424,10 +424,10 @@ APIs LXC → /api/lxc/* (LXC específico)
 ### **Testing Manual**
 ```bash
 # 1. Estado del sistema
-curl http://localhost:8080/api/unified/status | jq
+curl http://localhost:8080/api/status | jq
 
 # 2. Desplegar con auto-selección
-curl -X POST http://localhost:8080/api/unified/deploy \
+curl -X POST http://localhost:8080/api/deploy \
   -H "Content-Type: application/json" \
   -d '{"name": "test-app", "repo_url": "https://github.com/example/app.git", "language": "go"}'
 

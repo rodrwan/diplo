@@ -61,8 +61,8 @@ POST /api/v1/maintenance/prune-images  # Limpiar imágenes no utilizadas
 
 ### 6. Sistema Híbrido
 ```bash
-GET /api/unified/status       # Estado completo del sistema híbrido
-POST /api/unified/deploy      # Deployment con selección automática de runtime
+GET /api/status       # Estado completo del sistema híbrido
+POST /api/deploy      # Deployment con selección automática de runtime
 GET /api/docker/status        # Estado específico de Docker
 GET /api/lxc/status          # Estado específico de LXC
 ```

@@ -86,6 +86,9 @@ func (s *Server) setupRoutes() {
 	// Middleware CORS
 	s.router.Use(s.corsMiddleware)
 
+	// Static files
+	s.router.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("internal/templates/static"))))
+
 	// Frontend pages with unified layout
 	s.router.HandleFunc("/", s.appsPageHandler).Methods("GET")
 	s.router.HandleFunc("/apps", s.appsPageHandler).Methods("GET")

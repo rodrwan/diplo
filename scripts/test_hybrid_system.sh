@@ -30,7 +30,7 @@ make_request() {
     local method=$1
     local endpoint=$2
     local data=$3
-    
+
     if [ -z "$data" ]; then
         curl -s -X $method "$BASE_URL$endpoint" | jq '.' 2>/dev/null || curl -s -X $method "$BASE_URL$endpoint"
     else
@@ -44,19 +44,19 @@ make_request() {
 wait_for_server() {
     local max_attempts=30
     local attempt=1
-    
+
     while [ $attempt -le $max_attempts ]; do
         echo -e "${CYAN}   Intento $attempt/$max_attempts...${NC}"
-        
+
         if curl -s "$BASE_URL/health" > /dev/null 2>&1; then
             echo -e "${GREEN}✅ Servidor listo!${NC}"
             return 0
         fi
-        
+
         sleep 1
         ((attempt++))
     done
-    
+
     echo -e "${RED}❌ Servidor no arrancó después de $max_attempts intentos${NC}"
     return 1
 }
@@ -89,22 +89,22 @@ echo ""
 
 # Test 1: Verificar estado del sistema
 echo -e "${CYAN}📡 Verificando estado del sistema y runtimes disponibles${NC}"
-echo -e "${YELLOW}   GET /api/unified/status${NC}"
-make_request GET "/api/unified/status"
+echo -e "${YELLOW}   GET /api/status${NC}"
+make_request GET "/api/status"
 echo ""
 
 # Test 2: Verificar detección automática de runtimes
 echo -e "${CYAN}📡 Verificando detección automática de runtimes${NC}"
-echo -e "${YELLOW}   GET /api/unified/status${NC}"
-make_request GET "/api/unified/status"
+echo -e "${YELLOW}   GET /api/status${NC}"
+make_request GET "/api/status"
 echo ""
 
 # Test 3: Deployment con runtime automático
 echo -e "${BLUE}🚀 Desplegando aplicación Go con selección automática de runtime...${NC}"
 echo ""
 echo -e "${CYAN}📡 Desplegando aplicación Go (runtime automático)${NC}"
-echo -e "${YELLOW}   POST /api/unified/deploy${NC}"
-make_request POST "/api/unified/deploy" '{
+echo -e "${YELLOW}   POST /api/deploy${NC}"
+make_request POST "/api/deploy" '{
     "name": "go-web-app",
     "repo_url": "https://github.com/example/go-web-app.git",
     "language": "go"
@@ -115,8 +115,8 @@ echo ""
 echo -e "${BLUE}🐳 Desplegando aplicación Node.js forzando Docker...${NC}"
 echo ""
 echo -e "${CYAN}📡 Desplegando con runtime Docker forzado${NC}"
-echo -e "${YELLOW}   POST /api/unified/deploy${NC}"
-make_request POST "/api/unified/deploy" '{
+echo -e "${YELLOW}   POST /api/deploy${NC}"
+make_request POST "/api/deploy" '{
     "name": "node-api",
     "repo_url": "https://github.com/example/node-api.git",
     "language": "javascript",
@@ -128,8 +128,8 @@ echo ""
 echo -e "${BLUE}🐳 Desplegando aplicación Python forzando containerd...${NC}"
 echo ""
 echo -e "${CYAN}📡 Desplegando con runtime containerd forzado${NC}"
-echo -e "${YELLOW}   POST /api/unified/deploy${NC}"
-make_request POST "/api/unified/deploy" '{
+echo -e "${YELLOW}   POST /api/deploy${NC}"
+make_request POST "/api/deploy" '{
     "name": "flask-app",
     "repo_url": "https://github.com/example/flask-app.git",
     "language": "python",
@@ -139,22 +139,22 @@ echo ""
 
 # Test 6: Verificar aplicaciones desplegadas
 echo -e "${CYAN}📡 Verificando aplicaciones desplegadas${NC}"
-echo -e "${YELLOW}   GET /api/unified/status${NC}"
-make_request GET "/api/unified/status"
+echo -e "${YELLOW}   GET /api/status${NC}"
+make_request GET "/api/status"
 echo ""
 
 # Test 7: Información del sistema
 echo -e "${CYAN}🖥️  Información del sistema detectada:${NC}"
 echo -e "${CYAN}======================================${NC}"
-make_request GET "/api/unified/status" | jq '.data.system' 2>/dev/null || make_request GET "/api/unified/status"
+make_request GET "/api/status" | jq '.data.system' 2>/dev/null || make_request GET "/api/status"
 echo ""
 
 # Test 8: Deployment con Rust
 echo -e "${BLUE}🦀 Desplegando aplicación Rust...${NC}"
 echo ""
 echo -e "${CYAN}📡 Desplegando aplicación Rust${NC}"
-echo -e "${YELLOW}   POST /api/unified/deploy${NC}"
-make_request POST "/api/unified/deploy" '{
+echo -e "${YELLOW}   POST /api/deploy${NC}"
+make_request POST "/api/deploy" '{
     "name": "rust-api",
     "repo_url": "https://github.com/example/rust-api.git",
     "language": "rust"
@@ -183,7 +183,7 @@ echo ""
 # Test 10: Verificar capacidades por runtime
 echo -e "${CYAN}🎯 Verificando capacidades por runtime:${NC}"
 echo -e "${CYAN}======================================${NC}"
-make_request GET "/api/unified/status" | jq '.data.runtime' 2>/dev/null || make_request GET "/api/unified/status"
+make_request GET "/api/status" | jq '.data.runtime' 2>/dev/null || make_request GET "/api/status"
 echo ""
 
 # Resumen
@@ -199,7 +199,7 @@ echo ""
 
 # Información final del sistema
 echo -e "${PURPLE}🎉 RESULTADO FINAL:${NC}"
-SYSTEM_INFO=$(make_request GET "/api/unified/status")
+SYSTEM_INFO=$(make_request GET "/api/status")
 echo -e "${YELLOW}   Runtimes disponibles: ${NC}$(echo "$SYSTEM_INFO" | jq '.data.runtime.available' 2>/dev/null || echo "N/A")"
 echo -e "${YELLOW}   Runtime preferido: ${NC}$(echo "$SYSTEM_INFO" | jq '.data.runtime.preferred' 2>/dev/null || echo "N/A")"
 echo -e "${YELLOW}   Sistema: ${NC}$(echo "$SYSTEM_INFO" | jq '.data.system.os' 2>/dev/null || echo "N/A") $(echo "$SYSTEM_INFO" | jq '.data.system.architecture' 2>/dev/null || echo "N/A")"

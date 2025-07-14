@@ -14,9 +14,15 @@ build: deps generate sqlc
 	@mkdir -p $(BUILD_DIR)
 	go build -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PATH)
 
+# Generar templates y compilar
+build-templates: generate
+	@echo "Generando templates Templ..."
+	go generate ./...
+
 run: build
 	@echo "Ejecutando Diplo..."
-	./$(BUILD_DIR)/$(BINARY_NAME)
+	@clear && ./$(BUILD_DIR)/$(BINARY_NAME)
+
 
 clean:
 	@echo "Limpiando..."

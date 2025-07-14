@@ -16,7 +16,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// UnifiedStatusHandler maneja el endpoint GET /api/unified/status
+// UnifiedStatusHandler maneja el endpoint GET /api/status
 func UnifiedStatusHandler(ctx *HybridContext, w http.ResponseWriter, r *http.Request) (Response, error) {
 	factory, ok := ctx.runtimeFactory.(runtimePkg.RuntimeFactory)
 	if !ok {

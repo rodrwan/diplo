@@ -426,7 +426,7 @@ templ SystemStatus() {
         // Cargar estado del sistema
         async function loadSystemStatus() {
             try {
-                const response = await fetch('/api/unified/status');
+                const response = await fetch('/api/v1/status');
                 const data = await response.json();
                 systemStatusData = data.data;
 
