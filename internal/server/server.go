@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -124,6 +126,8 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/apps/{id}/env/{key}", ctx.ServeHTTP(handlers.DeleteAppEnvVarHandler)).Methods("DELETE")
 	// Maintenance endpoints
 	api.HandleFunc("/maintenance/prune-images", ctx.ServeHTTP(handlers.PruneImagesHandler)).Methods("POST")
+	api.HandleFunc("/maintenance/cleanup-orphaned-containers", ctx.ServeHTTP(handlers.CleanupOrphanedContainersHandler)).Methods("POST")
+	api.HandleFunc("/maintenance/aggressive-cleanup", ctx.ServeHTTP(handlers.AggressiveCleanupContainersHandler)).Methods("POST")
 	// SSE endpoint para logs en tiempo real
 	api.HandleFunc("/apps/{id}/logs", ctx.ServeHTTP(handlers.LogsSSEHandler)).Methods("GET")
 
@@ -181,9 +185,16 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+// Start inicia el servidor forzando IPv4
 func (s *Server) Start() error {
-	logrus.Infof("Servidor Diplo iniciado en %s", s.server.Addr)
-	return s.server.ListenAndServe()
+	listener, err := net.Listen("tcp4", s.server.Addr)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("Servidor escuchando en http://%s\n", s.server.Addr)
+
+	return s.server.Serve(listener)
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {

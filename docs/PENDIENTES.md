@@ -6,7 +6,7 @@
 
 1. **🏗️ Arquitectura Sólida**
    - Sistema híbrido completo con factory pattern
-   - Interfaz unificada `ContainerRuntime` para LXC/Docker/containerd
+   - Interfaz unificada `ContainerRuntime` para Docker/containerd
    - Detección automática de OS y runtime preferido
 
 2. **🐳 Docker Client Funcional**
@@ -16,7 +16,7 @@
 
 3. **📋 Templates Completos**
    - Go, Node.js, Python, Rust templates implementados
-   - Templates para todos los runtimes (Docker, LXC, containerd)
+   - Templates para todos los runtimes (Docker, containerd)
    - Sistema de renderizado funcional
 
 4. **🌐 API y Frontend**

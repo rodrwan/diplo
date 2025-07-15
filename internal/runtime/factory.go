@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -32,41 +31,63 @@ func (f *DefaultRuntimeFactory) detectAvailableRuntimes() {
 	defer f.mu.Unlock()
 
 	var available []RuntimeType
+	osInfo := f.getOSInfo()
 
-	// Verificar LXC
-	if f.isLXCAvailable() {
-		available = append(available, RuntimeTypeLXC)
-		logrus.Info("LXC runtime detectado y disponible")
+	// En Raspberry Pi, priorizar containerd
+	if osInfo.IsRaspberry {
+		logrus.Info("Detectado Raspberry Pi - priorizando containerd")
+
+		// Verificar containerd primero
+		if f.isContainerdAvailable() {
+			available = append(available, RuntimeTypeContainerd)
+			logrus.Info("Containerd runtime detectado y disponible en Raspberry Pi")
+		} else {
+			logrus.Warn("Containerd no disponible en Raspberry Pi - se recomienda instalarlo")
+			logrus.Info("Para instalar containerd en Raspberry Pi: sudo ./scripts/install_containerd.sh")
+		}
+
+		// Verificar Docker como fallback
+		if f.isDockerAvailable() {
+			available = append(available, RuntimeTypeDocker)
+			logrus.Info("Docker runtime detectado como fallback en Raspberry Pi")
+		} else {
+			logrus.Debug("Docker runtime no disponible en Raspberry Pi")
+		}
+
+		// Si no hay runtimes disponibles, agregar containerd como simulado
+		if len(available) == 0 {
+			available = append(available, RuntimeTypeContainerd)
+			logrus.Warn("No hay runtimes nativos disponibles en Raspberry Pi, usando containerd simulado")
+			logrus.Info("Se recomienda instalar containerd: sudo ./scripts/install_containerd.sh")
+		}
 	} else {
-		logrus.Debug("LXC runtime no disponible")
-	}
+		// Para otros sistemas, usar lógica estándar
+		// Verificar Docker
+		if f.isDockerAvailable() {
+			available = append(available, RuntimeTypeDocker)
+			logrus.Info("Docker runtime detectado y disponible")
+		} else {
+			logrus.Debug("Docker runtime no disponible")
+		}
 
-	// Verificar Docker
-	if f.isDockerAvailable() {
-		available = append(available, RuntimeTypeDocker)
-		logrus.Info("Docker runtime detectado y disponible")
-	} else {
-		logrus.Debug("Docker runtime no disponible")
-	}
+		// Verificar containerd
+		if f.isContainerdAvailable() {
+			available = append(available, RuntimeTypeContainerd)
+			logrus.Info("containerd runtime detectado y disponible")
+		} else {
+			logrus.Debug("containerd runtime no disponible")
+		}
 
-	// Verificar containerd
-	if f.isContainerdAvailable() {
-		available = append(available, RuntimeTypeContainerd)
-		logrus.Info("containerd runtime detectado y disponible")
-	} else {
-		logrus.Debug("containerd runtime no disponible")
-	}
-
-	// Si no hay runtimes disponibles, al menos agregar containerd como simulado
-	if len(available) == 0 {
-		available = append(available, RuntimeTypeContainerd)
-		logrus.Info("No hay runtimes nativos disponibles, usando containerd simulado")
+		// Si no hay runtimes disponibles, agregar containerd como simulado
+		if len(available) == 0 {
+			available = append(available, RuntimeTypeContainerd)
+			logrus.Info("No hay runtimes nativos disponibles, usando containerd simulado")
+		}
 	}
 
 	f.availableRuntimes = available
 
 	// Determinar runtime preferido
-	osInfo := f.getOSInfo()
 	f.preferredRuntime = f.determinePreferredRuntime(osInfo)
 
 	logrus.Infof("Runtimes disponibles: %v, preferido: %s", available, f.preferredRuntime)
@@ -189,31 +210,6 @@ func (f *DefaultRuntimeFactory) isRunningInVM() bool {
 	return false
 }
 
-// isLXCAvailable verifica si LXC está disponible
-func (f *DefaultRuntimeFactory) isLXCAvailable() bool {
-	// Verificar comandos LXC
-	lxcCommands := []string{"lxc-create", "lxc-start", "lxc-stop", "lxc-info"}
-
-	for _, cmd := range lxcCommands {
-		if _, err := exec.LookPath(cmd); err != nil {
-			return false
-		}
-	}
-
-	// Verificar permisos y configuración
-	if runtime.GOOS == "linux" {
-		// Verificar si el usuario puede usar LXC
-		if os.Geteuid() != 0 {
-			// Usuario no root, verificar si está en grupo lxd/lxc
-			if !f.isUserInLXCGroup() {
-				return false
-			}
-		}
-	}
-
-	return true
-}
-
 // isDockerAvailable verifica si Docker está disponible
 func (f *DefaultRuntimeFactory) isDockerAvailable() bool {
 	// Verificar comando docker
@@ -231,40 +227,78 @@ func (f *DefaultRuntimeFactory) isDockerAvailable() bool {
 
 // isContainerdAvailable verifica si containerd está disponible
 func (f *DefaultRuntimeFactory) isContainerdAvailable() bool {
+	osInfo := f.getOSInfo()
+
+	// En macOS, detectar containerd a través de Docker Desktop
+	if osInfo.OS == "darwin" {
+		// Verificar que Docker esté disponible
+		if !f.isDockerAvailable() {
+			logrus.Debug("Docker no disponible en macOS")
+			return false
+		}
+
+		// Verificar que containerd esté disponible a través de Docker
+		cmd := exec.Command("docker", "info")
+		output, err := cmd.Output()
+		if err != nil {
+			logrus.Debug("No se pudo obtener información de Docker")
+			return false
+		}
+
+		outputStr := string(output)
+		if strings.Contains(outputStr, "containerd version:") {
+			// Extraer la versión de containerd
+			lines := strings.Split(outputStr, "\n")
+			for _, line := range lines {
+				if strings.Contains(line, "containerd version:") {
+					version := strings.TrimSpace(strings.TrimPrefix(line, "containerd version:"))
+					logrus.Infof("Containerd detectado a través de Docker Desktop: %s", version)
+					return true
+				}
+			}
+		}
+
+		logrus.Debug("Containerd no disponible a través de Docker")
+		return false
+	}
+
+	// Para otros sistemas (Linux), usar la detección original
 	// Verificar comando containerd
 	if _, err := exec.LookPath("containerd"); err != nil {
+		logrus.Debug("Containerd no está instalado")
 		return false
 	}
 
 	// Verificar comando ctr (client de containerd)
 	if _, err := exec.LookPath("ctr"); err != nil {
+		logrus.Debug("ctr CLI no está disponible")
 		return false
 	}
 
 	// Verificar que el daemon esté corriendo
 	if err := f.checkContainerdDaemon(); err != nil {
+		logrus.Debugf("Containerd daemon no está corriendo: %v", err)
 		return false
 	}
 
 	return true
 }
 
-// isUserInLXCGroup verifica si el usuario está en un grupo LXC
-func (f *DefaultRuntimeFactory) isUserInLXCGroup() bool {
-	cmd := exec.Command("groups")
-	output, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-
-	groups := strings.ToLower(string(output))
-	return strings.Contains(groups, "lxd") || strings.Contains(groups, "lxc")
-}
-
 // checkContainerdDaemon verifica que el daemon de containerd esté corriendo
 func (f *DefaultRuntimeFactory) checkContainerdDaemon() error {
+	// Verificar que el socket existe
+	socketPath := "/run/containerd/containerd.sock"
+	if _, err := os.Stat(socketPath); os.IsNotExist(err) {
+		return fmt.Errorf("socket de containerd no encontrado en %s", socketPath)
+	}
+
+	// Verificar que containerd responde
 	cmd := exec.Command("ctr", "version")
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("containerd no está corriendo: %w", err)
+	}
+
+	return nil
 }
 
 // checkDockerDaemon verifica que el daemon de Docker esté corriendo
@@ -277,10 +311,16 @@ func (f *DefaultRuntimeFactory) checkDockerDaemon() error {
 func (f *DefaultRuntimeFactory) determinePreferredRuntime(osInfo *OSInfo) RuntimeType {
 	// Reglas de selección de runtime:
 
-	// 1. Si estamos en Raspberry Pi, preferir LXC (mejor rendimiento ARM)
+	// 1. Si estamos en Raspberry Pi, SIEMPRE preferir containerd (mejor rendimiento ARM)
 	if osInfo.IsRaspberry {
-		if f.isRuntimeAvailable(RuntimeTypeLXC) {
-			return RuntimeTypeLXC
+		if f.isRuntimeAvailable(RuntimeTypeContainerd) {
+			logrus.Info("Raspberry Pi detectado - usando containerd como runtime preferido")
+			return RuntimeTypeContainerd
+		} else {
+			logrus.Warn("Raspberry Pi detectado pero containerd no disponible - usando Docker como fallback")
+			if f.isRuntimeAvailable(RuntimeTypeDocker) {
+				return RuntimeTypeDocker
+			}
 		}
 	}
 
@@ -291,26 +331,32 @@ func (f *DefaultRuntimeFactory) determinePreferredRuntime(osInfo *OSInfo) Runtim
 		}
 	}
 
-	// 3. En macOS y Windows, preferir Docker (mejor compatibilidad)
-	if osInfo.OS == "darwin" || osInfo.OS == "windows" {
+	// 3. En macOS, SIEMPRE preferir Docker
+	if osInfo.OS == "darwin" {
 		if f.isRuntimeAvailable(RuntimeTypeDocker) {
+			logrus.Info("macOS detectado - usando Docker como runtime preferido")
 			return RuntimeTypeDocker
+		}
+		// Si por alguna razón tienes ctr y containerd real en Mac, lo puedes agregar aquí
+		if f.isRuntimeAvailable(RuntimeTypeContainerd) {
+			logrus.Info("macOS detectado - usando containerd como runtime preferido")
+			return RuntimeTypeContainerd
 		}
 	}
 
-	// 4. Si estamos en arquitectura ARM, preferir LXC
+	// 4. Si estamos en arquitectura ARM, preferir containerd
 	if osInfo.IsARM {
-		if f.isRuntimeAvailable(RuntimeTypeLXC) {
-			return RuntimeTypeLXC
+		if f.isRuntimeAvailable(RuntimeTypeContainerd) {
+			return RuntimeTypeContainerd
 		}
 	}
 
 	// 5. En distribuciones específicas, preferir según compatibilidad
 	switch osInfo.Distribution {
 	case "ubuntu", "debian":
-		// Ubuntu/Debian tienen buen soporte para LXC
-		if f.isRuntimeAvailable(RuntimeTypeLXC) {
-			return RuntimeTypeLXC
+		// Ubuntu/Debian tienen buen soporte para containerd
+		if f.isRuntimeAvailable(RuntimeTypeContainerd) {
+			return RuntimeTypeContainerd
 		}
 	case "rhel", "centos", "fedora":
 		// Red Hat family prefiere containerd
@@ -319,19 +365,14 @@ func (f *DefaultRuntimeFactory) determinePreferredRuntime(osInfo *OSInfo) Runtim
 		}
 	}
 
-	// 6. Fallback general: Docker > containerd > LXC
-	if f.isRuntimeAvailable(RuntimeTypeDocker) {
-		return RuntimeTypeDocker
-	}
-
-	// 7. Fallback a containerd
+	// 6. Fallback general: containerd > Docker
 	if f.isRuntimeAvailable(RuntimeTypeContainerd) {
 		return RuntimeTypeContainerd
 	}
 
-	// 8. Fallback a LXC
-	if f.isRuntimeAvailable(RuntimeTypeLXC) {
-		return RuntimeTypeLXC
+	// 7. Fallback a Docker
+	if f.isRuntimeAvailable(RuntimeTypeDocker) {
+		return RuntimeTypeDocker
 	}
 
 	// Si no hay ninguno disponible, devolver Docker como default
@@ -359,9 +400,6 @@ func (f *DefaultRuntimeFactory) CreateRuntime(runtimeType RuntimeType) (Containe
 	}
 
 	switch runtimeType {
-	case RuntimeTypeLXC:
-		return NewLXCClient()
-
 	case RuntimeTypeDocker:
 		return NewDockerClient()
 
@@ -401,10 +439,10 @@ func (f *DefaultRuntimeFactory) GetOSInfo() *OSInfo {
 
 // GetRuntimeForOS devuelve el runtime más apropiado para un SO específico
 func (f *DefaultRuntimeFactory) GetRuntimeForOS(osInfo *OSInfo) RuntimeType {
-	// En Raspberry Pi y sistemas ARM, preferir LXC
+	// En Raspberry Pi y sistemas ARM, preferir containerd
 	if osInfo.IsRaspberry || osInfo.IsARM {
-		if f.isRuntimeAvailable(RuntimeTypeLXC) {
-			return RuntimeTypeLXC
+		if f.isRuntimeAvailable(RuntimeTypeContainerd) {
+			return RuntimeTypeContainerd
 		}
 	}
 
@@ -425,14 +463,6 @@ func (f *DefaultRuntimeFactory) UpdateAvailableRuntimes() {
 	defer f.mu.Unlock()
 
 	var available []RuntimeType
-
-	// Verificar LXC
-	if err := validateLXCRuntime(); err == nil {
-		available = append(available, RuntimeTypeLXC)
-		logrus.Info("LXC runtime detected and available")
-	} else {
-		logrus.Debugf("LXC runtime not available: %v", err)
-	}
 
 	// Verificar Docker
 	if err := validateDockerRuntime(); err == nil {
@@ -497,30 +527,6 @@ func (f *DefaultRuntimeFactory) GetRuntimeInfo() map[RuntimeType]*RuntimeInfo {
 	}
 
 	return info
-}
-
-// validateLXCRuntime verifica si LXC está disponible en el sistema
-func validateLXCRuntime() error {
-	// Verificar si lxc-info está disponible
-	if err := exec.Command("lxc-info", "--version").Run(); err != nil {
-		return fmt.Errorf("lxc-info command not found: %w", err)
-	}
-
-	// Verificar si el usuario tiene permisos para usar LXC
-	if os.Geteuid() != 0 {
-		// Verificar si existe configuración de usuario no privilegiado
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("could not get home directory: %w", err)
-		}
-
-		lxcConfigPath := filepath.Join(homeDir, ".config", "lxc")
-		if _, err := os.Stat(lxcConfigPath); os.IsNotExist(err) {
-			return fmt.Errorf("LXC not configured for unprivileged use")
-		}
-	}
-
-	return nil
 }
 
 // validateDockerRuntime verifica si Docker está disponible en el sistema

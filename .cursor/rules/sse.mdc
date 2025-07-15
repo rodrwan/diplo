@@ -23,9 +23,6 @@ Qué debe retornar (éxito, logs, errores de compilación, etc).
 Desglose de flujo esperado:
 Describe los pasos exactos, por ejemplo:
 
-markdown
-Copy
-Edit
 1. Recibir payload JSON con `repo_name` y `repo_url`.
 2. Clonar repo en memoria (no en disco).
 3. Detectar lenguaje automáticamente (Go en este caso).
@@ -94,9 +91,6 @@ Qué hiciste, por qué y cómo.
 
 Lista detallada de archivos modificados:
 
-swift
-Copy
-Edit
 - handlers/deploy.go → nuevo handler POST /deploy
 - internal/docker/build.go → lógica para generar imagen desde buffer
 - internal/git/clone.go → clonado in-memory de repositorios

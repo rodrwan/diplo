@@ -2,10 +2,13 @@ package handlers
 
 import (
 	"bufio"
+	"context"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/gorilla/mux"
+	runtimePkg "github.com/rodrwan/diplo/internal/runtime"
 	"github.com/sirupsen/logrus"
 )
 
@@ -62,12 +65,49 @@ func LogsSSEHandler(ctx *Context, w http.ResponseWriter, r *http.Request) (Respo
 
 // streamContainerLogs obtiene logs del contenedor en tiempo real
 func streamContainerLogs(ctx *Context, containerID string, logChan chan<- string) {
-	logs, err := ctx.docker.GetContainerLogsStream(containerID)
-	if err != nil {
-		logMsg := createLogMessage("error", fmt.Sprintf("Error obteniendo logs: %v", err))
-		logChan <- logMsg
-		return
+	// Determinar el runtime basándose en el container ID
+	runtimeType := inferRuntimeFromContainerID(containerID)
+
+	var logs io.ReadCloser
+	var err error
+
+	switch runtimeType {
+	case runtimePkg.RuntimeTypeContainerd:
+		// Para containerd, usar el cliente específico
+		containerdClient, err := runtimePkg.NewContainerdClient("", "")
+		if err != nil {
+			logMsg := createLogMessage("error", fmt.Sprintf("Error creando cliente containerd: %v", err))
+			logChan <- logMsg
+			return
+		}
+		defer containerdClient.Close()
+
+		logs, err = containerdClient.GetContainerLogs(context.Background(), containerID)
+		if err != nil {
+			logMsg := createLogMessage("error", fmt.Sprintf("Error obteniendo logs de containerd: %v", err))
+			logChan <- logMsg
+			return
+		}
+
+	case runtimePkg.RuntimeTypeDocker:
+		// Para Docker, usar el cliente Docker
+		logs, err = ctx.docker.GetContainerLogsStream(containerID)
+		if err != nil {
+			logMsg := createLogMessage("error", fmt.Sprintf("Error obteniendo logs de Docker: %v", err))
+			logChan <- logMsg
+			return
+		}
+
+	default:
+		// Fallback a Docker
+		logs, err = ctx.docker.GetContainerLogsStream(containerID)
+		if err != nil {
+			logMsg := createLogMessage("error", fmt.Sprintf("Error obteniendo logs (fallback): %v", err))
+			logChan <- logMsg
+			return
+		}
 	}
+
 	defer logs.Close()
 
 	// Leer logs línea por línea

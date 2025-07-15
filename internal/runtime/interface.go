@@ -10,7 +10,6 @@ import (
 type RuntimeType string
 
 const (
-	RuntimeTypeLXC        RuntimeType = "lxc"
 	RuntimeTypeContainerd RuntimeType = "containerd"
 	RuntimeTypeDocker     RuntimeType = "docker"
 )

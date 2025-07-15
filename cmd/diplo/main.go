@@ -22,6 +22,9 @@ func main() {
 		FullTimestamp: true,
 	})
 
+	// Temporalmente activar debug para diagnosticar el problema de runtime detection
+	logrus.SetLevel(logrus.DebugLevel)
+
 	logrus.Info("=== Diplo - PaaS Local en Go ===")
 	logrus.Info("Iniciando servidor...")
 
