@@ -11,4 +11,5 @@ type DeployRequest struct {
 	RuntimeType string   `json:"runtime_type,omitempty"`
 	Language    string   `json:"language,omitempty"`
 	EnvVars     []EnvVar `json:"env_vars,omitempty"`
+	GitHubToken string   `json:"github_token,omitempty"`
 }

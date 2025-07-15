@@ -72,17 +72,12 @@ func UnifiedDeployHandler(ctx *HybridContext, w http.ResponseWriter, r *http.Req
 	}
 
 	// Si existe una app con el mismo repo_url, hacer redeploy
-	if err != sql.ErrNoRows {
-		logrus.Infof("App existente encontrada para %s, haciendo redeploy: %s", req.RepoURL, existingApp.ID)
-
-		// Actualizar nombre si se proporcionó uno nuevo
-		if req.Name != "" && req.Name != existingApp.Name {
-			existingApp.Name = req.Name
-		}
+	if existingApp.ID != "" {
+		logrus.Infof("Aplicación existente encontrada: %s (%s), iniciando redeploy", existingApp.Name, existingApp.ID)
 
 		// Actualizar variables de entorno si se proporcionaron
 		if len(req.EnvVars) > 0 {
-			// Eliminar variables existentes una por una (no existe DeleteAppEnvVars)
+			// Eliminar variables de entorno existentes una por una
 			existingEnvVars, err := ctx.queries.GetAppEnvVars(r.Context(), existingApp.ID)
 			if err == nil {
 				for _, existing := range existingEnvVars {
@@ -95,7 +90,7 @@ func UnifiedDeployHandler(ctx *HybridContext, w http.ResponseWriter, r *http.Req
 				}
 			}
 
-			// Guardar nuevas variables de entorno
+			// Agregar nuevas variables de entorno
 			for _, envVar := range req.EnvVars {
 				// Validar nombre de variable
 				if !isValidEnvVarName(envVar.Name) {
@@ -145,10 +140,9 @@ func UnifiedDeployHandler(ctx *HybridContext, w http.ResponseWriter, r *http.Req
 			}
 		}
 
-		// Iniciar redeploy en background usando runtime factory
-		go unifiedRedeployApp(ctx, &existingApp, factory)
+		// Iniciar redeploy en background
+		go unifiedRedeployApp(ctx, &existingApp, factory, req.GitHubToken)
 
-		// Responder inmediatamente
 		response := map[string]interface{}{
 			"id":           existingApp.ID,
 			"name":         existingApp.Name,
@@ -261,7 +255,7 @@ func UnifiedDeployHandler(ctx *HybridContext, w http.ResponseWriter, r *http.Req
 	}
 
 	// Iniciar deployment en background usando runtime factory
-	go unifiedDeployApp(ctx, app, factory)
+	go unifiedDeployApp(ctx, app, factory, req.GitHubToken)
 
 	// Responder inmediatamente
 	response := map[string]interface{}{
@@ -272,10 +266,11 @@ func UnifiedDeployHandler(ctx *HybridContext, w http.ResponseWriter, r *http.Req
 		"url":          fmt.Sprintf("http://localhost:%d", app.Port),
 		"status":       "deploying",
 		"runtime_type": selectedRuntime,
-		"message":      "Aplicación creada y deployment iniciado con runtime " + string(selectedRuntime),
+		"env_vars":     len(req.EnvVars),
+		"message":      "Deployment iniciado exitosamente",
 	}
 
-	return Response{Code: http.StatusCreated, Data: response}, nil
+	return Response{Code: http.StatusOK, Data: response}, nil
 }
 
 // HybridLXCStatusHandler maneja el endpoint GET /api/lxc/status (versión híbrida)
@@ -343,7 +338,7 @@ func getSupportedImages(runtimeType runtimePkg.RuntimeType) []string {
 }
 
 // unifiedDeployApp ejecuta el deployment usando el runtime factory
-func unifiedDeployApp(ctx *HybridContext, app *database.App, factory runtimePkg.RuntimeFactory) {
+func unifiedDeployApp(ctx *HybridContext, app *database.App, factory runtimePkg.RuntimeFactory, gitHubToken string) {
 	// Obtener runtime preferido del factory
 	selectedRuntime := factory.GetPreferredRuntime()
 	logrus.Infof("Iniciando deployment unificado de: %s (%s) con runtime %s", app.Name, app.ID, selectedRuntime)
@@ -392,7 +387,7 @@ func unifiedDeployApp(ctx *HybridContext, app *database.App, factory runtimePkg.
 
 	// Detectar lenguaje
 	sendHybridLogMessage(ctx, app.ID, "info", "Detectando lenguaje...")
-	language, err := detectLanguage(app.RepoUrl)
+	language, err := detectLanguage(app.RepoUrl, gitHubToken)
 	if err != nil {
 		logrus.Errorf("Error detectando lenguaje: %v", err)
 		handleUnifiedDeployError(ctx, app, fmt.Sprintf("Error detectando lenguaje: %v", err))
@@ -455,7 +450,7 @@ func unifiedDeployApp(ctx *HybridContext, app *database.App, factory runtimePkg.
 		deployApp(regularCtx, app, envVars)
 	case runtimePkg.RuntimeTypeContainerd:
 		if runtime != nil {
-			deployWithContainerd(ctx, app, runtime, envVars, language)
+			deployWithContainerd(ctx, app, runtime, envVars, language, gitHubToken)
 		} else {
 			// Fallback a Docker si no se pudo crear el runtime containerd
 			logrus.Warnf("No se pudo crear runtime containerd, usando Docker como fallback")
@@ -471,7 +466,7 @@ func unifiedDeployApp(ctx *HybridContext, app *database.App, factory runtimePkg.
 }
 
 // deployWithContainerd ejecuta el deployment usando containerd
-func deployWithContainerd(ctx *HybridContext, app *database.App, runtime runtimePkg.ContainerRuntime, envVars []models.EnvVar, language string) {
+func deployWithContainerd(ctx *HybridContext, app *database.App, runtime runtimePkg.ContainerRuntime, envVars []models.EnvVar, language string, gitHubToken string) {
 	sendHybridLogMessage(ctx, app.ID, "info", "🚀 Iniciando deployment con containerd...")
 	sendHybridLogMessage(ctx, app.ID, "info", fmt.Sprintf("📦 Aplicación: %s (%s)", app.Name, app.ID))
 	sendHybridLogMessage(ctx, app.ID, "info", fmt.Sprintf("🔗 Repositorio: %s", app.RepoUrl))
@@ -726,7 +721,20 @@ func deployWithContainerd(ctx *HybridContext, app *database.App, runtime runtime
 
 	// Clonar repositorio PRIMERO
 	sendHybridLogMessage(ctx, app.ID, "info", "Clonando repositorio...")
-	cloneResult, err := runtime.ExecuteCommand(context.Background(), container.ID, []string{"git", "clone", app.RepoUrl, "/app/src"})
+
+	var cloneCmd []string
+	if gitHubToken != "" {
+		// Usar token para repositorios privados
+		repoURLWithToken := strings.Replace(app.RepoUrl, "https://github.com/", fmt.Sprintf("https://%s@github.com/", gitHubToken), 1)
+		cloneCmd = []string{"git", "clone", repoURLWithToken, "/app/src"}
+		sendHybridLogMessage(ctx, app.ID, "info", "Clonando repositorio privado con token de GitHub")
+	} else {
+		// Clonación normal para repositorios públicos
+		cloneCmd = []string{"git", "clone", app.RepoUrl, "/app/src"}
+		sendHybridLogMessage(ctx, app.ID, "info", "Clonando repositorio público")
+	}
+
+	cloneResult, err := runtime.ExecuteCommand(context.Background(), container.ID, cloneCmd)
 	if err != nil {
 		logrus.Errorf("Error clonando repositorio: %v", err)
 		handleUnifiedDeployError(ctx, app, fmt.Sprintf("Error clonando repositorio: %v", err))
@@ -843,7 +851,7 @@ func deployWithContainerd(ctx *HybridContext, app *database.App, runtime runtime
 }
 
 // unifiedRedeployApp ejecuta el redeploy usando el runtime factory
-func unifiedRedeployApp(ctx *HybridContext, app *database.App, factory runtimePkg.RuntimeFactory) {
+func unifiedRedeployApp(ctx *HybridContext, app *database.App, factory runtimePkg.RuntimeFactory, gitHubToken string) {
 	logrus.Infof("Iniciando redeploy unificado de: %s (%s)", app.Name, app.ID)
 
 	// Obtener runtime preferido para el redeploy
@@ -921,7 +929,7 @@ func unifiedRedeployApp(ctx *HybridContext, app *database.App, factory runtimePk
 		redeployExistingApp(regularCtx, app)
 	case runtimePkg.RuntimeTypeContainerd:
 		if runtime != nil {
-			redeployWithContainerd(ctx, app, runtime)
+			redeployWithContainerd(ctx, app, runtime, gitHubToken)
 		} else {
 			// Fallback a Docker si no se pudo crear el runtime containerd
 			logrus.Warnf("No se pudo crear runtime containerd para redeploy, usando Docker como fallback")
@@ -937,7 +945,7 @@ func unifiedRedeployApp(ctx *HybridContext, app *database.App, factory runtimePk
 }
 
 // redeployWithContainerd ejecuta el redeploy usando containerd
-func redeployWithContainerd(ctx *HybridContext, app *database.App, runtime runtimePkg.ContainerRuntime) {
+func redeployWithContainerd(ctx *HybridContext, app *database.App, runtime runtimePkg.ContainerRuntime, gitHubToken string) {
 	sendHybridLogMessage(ctx, app.ID, "info", "🔄 Iniciando redeploy con containerd...")
 	sendHybridLogMessage(ctx, app.ID, "info", fmt.Sprintf("📦 Aplicación: %s (%s)", app.Name, app.ID))
 	sendHybridLogMessage(ctx, app.ID, "info", fmt.Sprintf("🔗 Repositorio: %s", app.RepoUrl))
@@ -981,7 +989,7 @@ func redeployWithContainerd(ctx *HybridContext, app *database.App, runtime runti
 
 	// Detectar lenguaje
 	sendHybridLogMessage(ctx, app.ID, "info", "Detectando lenguaje...")
-	language, err := detectLanguage(app.RepoUrl)
+	language, err := detectLanguage(app.RepoUrl, gitHubToken)
 	if err != nil {
 		logrus.Errorf("Error detectando lenguaje en redeploy: %v", err)
 		handleUnifiedRedeployError(ctx, app, fmt.Sprintf("Error detectando lenguaje: %v", err))
@@ -1276,7 +1284,20 @@ func redeployWithContainerd(ctx *HybridContext, app *database.App, runtime runti
 
 	// Clonar repositorio PRIMERO
 	sendHybridLogMessage(ctx, app.ID, "info", "Clonando repositorio...")
-	cloneResult, err := runtime.ExecuteCommand(context.Background(), container.ID, []string{"git", "clone", app.RepoUrl, "/app/src"})
+
+	var cloneCmd []string
+	if gitHubToken != "" {
+		// Usar token para repositorios privados
+		repoURLWithToken := strings.Replace(app.RepoUrl, "https://github.com/", fmt.Sprintf("https://%s@github.com/", gitHubToken), 1)
+		cloneCmd = []string{"git", "clone", repoURLWithToken, "/app/src"}
+		sendHybridLogMessage(ctx, app.ID, "info", "Clonando repositorio privado con token de GitHub")
+	} else {
+		// Clonación normal para repositorios públicos
+		cloneCmd = []string{"git", "clone", app.RepoUrl, "/app/src"}
+		sendHybridLogMessage(ctx, app.ID, "info", "Clonando repositorio público")
+	}
+
+	cloneResult, err := runtime.ExecuteCommand(context.Background(), container.ID, cloneCmd)
 	if err != nil {
 		logrus.Errorf("Error clonando repositorio: %v", err)
 		handleUnifiedRedeployError(ctx, app, fmt.Sprintf("Error clonando repositorio: %v", err))

@@ -55,6 +55,12 @@ templ DockerEvents() {
 
         <div class="form-row">
             <div class="form-group">
+                <label for="githubToken">Token de GitHub (Opcional):</label>
+                <input type="password" id="githubToken" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                       title="Solo necesario para repositorios privados. No se guardará en la base de datos.">
+                <small class="form-help">🔒 Solo necesario para repositorios privados</small>
+            </div>
+            <div class="form-group">
                 <label for="runtimeType">Runtime:</label>
                 <select id="runtimeType">
                     <option value="">🤖 Auto-detectar (Recomendado)</option>
@@ -63,6 +69,9 @@ templ DockerEvents() {
                     <option value="containerd">🏗️ containerd</option>
                 </select>
             </div>
+        </div>
+
+        <div class="form-row">
             <div class="form-group">
                 <label for="languageHint">Lenguaje (Opcional):</label>
                 <select id="languageHint">
@@ -73,6 +82,9 @@ templ DockerEvents() {
                     <option value="rust">Rust</option>
                     <option value="java">Java</option>
                 </select>
+            </div>
+            <div class="form-group">
+                <!-- Espacio reservado para futuras opciones -->
             </div>
         </div>
 
@@ -234,6 +246,13 @@ templ DockerEvents() {
         .form-group input:focus, .form-group select:focus {
             outline: none;
             border-color: #3498db;
+        }
+        .form-help {
+            display: block;
+            margin-top: 5px;
+            font-size: 0.85em;
+            color: #95a5a6;
+            font-style: italic;
         }
         .deployment-actions {
             text-align: center;
@@ -628,6 +647,7 @@ templ DockerEvents() {
         async function startDeployment() {
             const appName = document.getElementById('appName').value;
             const repoUrl = document.getElementById('repoUrl').value;
+            const githubToken = document.getElementById('githubToken').value;
             const runtimeType = document.getElementById('runtimeType').value;
             const languageHint = document.getElementById('languageHint').value;
             const envVars = getEnvVars();
@@ -645,6 +665,9 @@ templ DockerEvents() {
             if (envVars.length > 0) {
                 addLogEntry(`🔧 Variables de entorno configuradas: ${envVars.length}`, 'info');
             }
+            if (githubToken) {
+                addLogEntry('🔐 Token de GitHub configurado para repositorio privado', 'info');
+            }
 
             try {
                 const payload = {
@@ -652,6 +675,10 @@ templ DockerEvents() {
                     repo_url: repoUrl,
                     env_vars: envVars
                 };
+
+                if (githubToken) {
+                    payload.github_token = githubToken;
+                }
 
                 if (runtimeType) {
                     payload.runtime_type = runtimeType;

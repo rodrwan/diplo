@@ -82,7 +82,7 @@ func deployApp(ctx *Context, app *database.App, envVars []models.EnvVar) {
 
 	// Detectar lenguaje
 	sendLogMessage(ctx, app.ID, "info", "Detectando lenguaje...")
-	language, err := detectLanguage(app.RepoUrl)
+	language, err := detectLanguage(app.RepoUrl, "") // Pass an empty string for githubToken
 	if err != nil {
 		logrus.Errorf("Error detectando lenguaje: %v", err)
 		app.Status = database.StatusError
@@ -286,7 +286,7 @@ func redeployExistingApp(ctx *Context, app *database.App) {
 
 	// Detectar lenguaje
 	sendLogMessage(ctx, app.ID, "info", "Detectando lenguaje...")
-	language, err := detectLanguage(app.RepoUrl)
+	language, err := detectLanguage(app.RepoUrl, "") // Pass an empty string for githubToken
 	if err != nil {
 		logrus.Errorf("Error detectando lenguaje en redeploy: %v", err)
 		handleRedeployError(ctx, app, fmt.Sprintf("Error detectando lenguaje: %v", err))
@@ -570,7 +570,7 @@ func isPortAvailable(port int) bool {
 	return true
 }
 
-func detectLanguage(repoURL string) (string, error) {
+func detectLanguage(repoURL string, githubToken string) (string, error) {
 	logrus.Debugf("Detectando lenguaje para repo: %s", repoURL)
 
 	// Crear directorio temporal
@@ -580,8 +580,20 @@ func detectLanguage(repoURL string) (string, error) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	// Clonar repositorio con profundidad mínima
-	cloneCmd := exec.Command("git", "clone", "--depth", "1", repoURL, tempDir)
+	// Preparar comando de clonación
+	var cloneCmd *exec.Cmd
+	if githubToken != "" {
+		// Usar token para repositorios privados
+		// Formato: https://token@github.com/usuario/repo
+		repoURLWithToken := strings.Replace(repoURL, "https://github.com/", fmt.Sprintf("https://%s@github.com/", githubToken), 1)
+		cloneCmd = exec.Command("git", "clone", "--depth", "1", repoURLWithToken, tempDir)
+		logrus.Debugf("Clonando repositorio privado con token")
+	} else {
+		// Clonación normal para repositorios públicos
+		cloneCmd = exec.Command("git", "clone", "--depth", "1", repoURL, tempDir)
+		logrus.Debugf("Clonando repositorio público")
+	}
+
 	if err := cloneCmd.Run(); err != nil {
 		return "", fmt.Errorf("error clonando repositorio: %w", err)
 	}
