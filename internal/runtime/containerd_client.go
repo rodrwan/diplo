@@ -177,6 +177,58 @@ func (c *ContainerdClient) CreateContainer(req *CreateContainerRequest) (*Contai
 	return container, nil
 }
 
+// GetRunningContainers returns a list of all running containers
+func (c *ContainerdClient) GetRunningContainers() ([]*Container, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// Actualizar estado de contenedores
+	if err := c.refreshContainers(); err != nil {
+		return nil, fmt.Errorf("error actualizando lista de containers: %w", err)
+	}
+
+	var runningContainers []*Container
+	for _, container := range c.containers {
+		if container.Status == ContainerStatusRunning {
+			runningContainers = append(runningContainers, container)
+		}
+	}
+
+	return runningContainers, nil
+}
+
+// GetContainerStatus returns the status of a container
+func (c *ContainerdClient) GetContainerStatus(containerID string) (string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// Verificar estado real del contenedor
+	cmd := exec.Command("ctr", "-n", c.namespace, "tasks", "list")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("error verificando estado del contenedor %s: %w", containerID, err)
+	}
+
+	// Verificar si el contenedor está corriendo
+	isRunning := strings.Contains(string(output), containerID)
+	if isRunning {
+		return "running", nil
+	}
+
+	// Verificar si el contenedor existe pero no está corriendo
+	containersCmd := exec.Command("ctr", "-n", c.namespace, "containers", "list")
+	containersOutput, err := containersCmd.Output()
+	if err != nil {
+		return "unknown", fmt.Errorf("error verificando existencia del contenedor %s: %w", containerID, err)
+	}
+
+	if strings.Contains(string(containersOutput), containerID) {
+		return "stopped", nil
+	}
+
+	return "not_found", nil
+}
+
 // StartContainer inicia un contenedor containerd
 func (c *ContainerdClient) StartContainer(ctx context.Context, containerID string) error {
 	c.mu.Lock()

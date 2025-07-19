@@ -30,6 +30,8 @@ type ContainerRuntime interface {
 	// Información de contenedores
 	GetContainer(containerID string) (*Container, error)
 	ListContainers(ctx context.Context) ([]*Container, error)
+	GetRunningContainers() ([]*Container, error)
+	GetContainerStatus(containerID string) (string, error)
 	GetContainerLogs(ctx context.Context, containerID string) (io.ReadCloser, error)
 
 	// Ejecución de comandos

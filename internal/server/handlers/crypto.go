@@ -98,6 +98,11 @@ func decryptValue(ciphertext string) (string, error) {
 	return string(plaintext), nil
 }
 
+// DecryptValue descifra un valor usando AES-GCM (función pública)
+func DecryptValue(ciphertext string) (string, error) {
+	return decryptValue(ciphertext)
+}
+
 // shouldEncryptValue determina si un valor debe ser cifrado
 func shouldEncryptValue(isSecret bool) bool {
 	return isSecret

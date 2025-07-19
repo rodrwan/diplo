@@ -77,6 +77,18 @@ func (d *Client) GetContainerStatus(containerID string) (string, error) {
 	return containerJSON.State.Status, nil
 }
 
+// GetRunningContainers returns a list of all running containers
+func (d *Client) GetRunningContainers() ([]types.Container, error) {
+	containers, err := d.cli.ContainerList(context.Background(), types.ContainerListOptions{
+		All: false, // Only running containers
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error listing running containers: %w", err)
+	}
+
+	return containers, nil
+}
+
 // GetContainerLogsStream gets a real-time stream of container logs.
 func (d *Client) GetContainerLogsStream(containerID string) (io.ReadCloser, error) {
 	logOptions := types.ContainerLogsOptions{

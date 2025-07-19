@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"bytes"
+
 	"github.com/rodrwan/diplo/internal/database"
 	"github.com/rodrwan/diplo/internal/docker"
 	"github.com/rodrwan/diplo/internal/models"
@@ -587,15 +589,51 @@ func detectLanguage(repoURL string, githubToken string) (string, error) {
 		// Formato: https://token@github.com/usuario/repo
 		repoURLWithToken := strings.Replace(repoURL, "https://github.com/", fmt.Sprintf("https://%s@github.com/", githubToken), 1)
 		cloneCmd = exec.Command("git", "clone", "--depth", "1", repoURLWithToken, tempDir)
-		logrus.Debugf("Clonando repositorio privado con token")
+		logrus.Debugf("Clonando repositorio privado con token: %s", repoURLWithToken)
 	} else {
 		// Clonación normal para repositorios públicos
 		cloneCmd = exec.Command("git", "clone", "--depth", "1", repoURL, tempDir)
-		logrus.Debugf("Clonando repositorio público")
+		logrus.Debugf("Clonando repositorio público: %s", repoURL)
 	}
 
+	// Capturar stderr para mejor diagnóstico
+	var stderr bytes.Buffer
+	cloneCmd.Stderr = &stderr
+
 	if err := cloneCmd.Run(); err != nil {
-		return "", fmt.Errorf("error clonando repositorio: %w", err)
+		errorOutput := stderr.String()
+		logrus.Errorf("Error clonando repositorio: %v", err)
+		logrus.Errorf("Stderr output: %s", errorOutput)
+
+		// Detectar errores específicos de autenticación
+		if strings.Contains(errorOutput, "Authentication failed") || strings.Contains(errorOutput, "Invalid username or password") {
+			if githubToken != "" {
+				logrus.Errorf("Error de autenticación con token de GitHub. Verificar:")
+				logrus.Errorf("1. El token es válido y no ha expirado")
+				logrus.Errorf("2. El token tiene permisos de 'repo' para acceder a repositorios privados")
+				logrus.Errorf("3. El usuario tiene acceso al repositorio %s", repoURL)
+				return "", fmt.Errorf("error de autenticación con token de GitHub: %s", errorOutput)
+			}
+		}
+
+		// Si falla con token, intentar sin token (por si es público)
+		if githubToken != "" {
+			logrus.Infof("Intentando clonación sin token (repositorio público)...")
+			cloneCmdPublic := exec.Command("git", "clone", "--depth", "1", repoURL, tempDir)
+			var stderrPublic bytes.Buffer
+			cloneCmdPublic.Stderr = &stderrPublic
+
+			if err := cloneCmdPublic.Run(); err != nil {
+				errorOutputPublic := stderrPublic.String()
+				logrus.Errorf("Error clonando sin token también: %v", err)
+				logrus.Errorf("Stderr output sin token: %s", errorOutputPublic)
+				return "", fmt.Errorf("error clonando repositorio (con y sin token): %w", err)
+			} else {
+				logrus.Infof("Repositorio clonado exitosamente sin token (es público)")
+			}
+		} else {
+			return "", fmt.Errorf("error clonando repositorio: %w", err)
+		}
 	}
 
 	// Definir archivos característicos por lenguaje

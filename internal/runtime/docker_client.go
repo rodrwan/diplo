@@ -158,6 +158,38 @@ func (d *DockerClient) ListContainers(ctx context.Context) ([]*Container, error)
 	return containers, nil
 }
 
+// GetRunningContainers returns a list of all running containers
+func (d *DockerClient) GetRunningContainers() ([]*Container, error) {
+	// Usar el método existente del cliente Docker
+	dockerContainers, err := d.client.GetRunningContainers()
+	if err != nil {
+		return nil, fmt.Errorf("error listando contenedores Docker: %w", err)
+	}
+
+	var runningContainers []*Container
+	for _, container := range dockerContainers {
+		containerName := container.ID
+		if len(container.Names) > 0 {
+			containerName = container.Names[0]
+		}
+		runningContainers = append(runningContainers, &Container{
+			ID:        container.ID,
+			Name:      containerName,
+			Image:     container.Image,
+			Status:    ContainerStatusRunning,
+			Runtime:   RuntimeTypeDocker,
+			CreatedAt: time.Unix(container.Created, 0),
+		})
+	}
+
+	return runningContainers, nil
+}
+
+// GetContainerStatus returns the status of a container
+func (d *DockerClient) GetContainerStatus(containerID string) (string, error) {
+	return d.client.GetContainerStatus(containerID)
+}
+
 // GetContainerLogs obtiene los logs de un contenedor
 func (d *DockerClient) GetContainerLogs(ctx context.Context, containerID string) (io.ReadCloser, error) {
 	logrus.Infof("Obteniendo logs del contenedor Docker: %s", containerID)

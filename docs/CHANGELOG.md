@@ -1,5 +1,62 @@
 # Changelog - Diplo
 
+## [1.1.0] - 2024-12-19
+
+### 🎉 **Recuperación Automática de Contenedores**
+
+#### **Nueva Funcionalidad Crítica:**
+
+### ✅ **Mecanismo de Recuperación Automática**
+- **Recuperación al Iniciar:** El servidor ahora recupera automáticamente contenedores perdidos al reiniciar
+- **Verificación de Estado:** Compara contenedores en BD vs. contenedores realmente ejecutándose
+- **Recreación Inteligente:** Recrea contenedores perdidos usando imágenes existentes
+- **Manejo de Variables Secretas:** Descifra automáticamente variables de entorno secretas durante la recuperación
+
+### ✅ **Soporte Multi-Runtime (Docker + Containerd)**
+- **Detección Automática:** Detecta automáticamente si usar Docker o containerd
+- **GetRunningContainers():** Implementado para ambos runtimes
+- **GetContainerStatus():** Verificación de estado para Docker y containerd
+- **Fallback Inteligente:** Usa Docker como fallback si containerd no está disponible
+- **Recuperación Híbrida:** Soporte completo para ambos runtimes
+
+### ✅ **Endpoint de Recuperación Manual**
+- **POST /api/v1/maintenance/recover-containers:** Endpoint para recuperación manual de contenedores
+- **Respuesta Detallada:** Incluye estadísticas de recuperación (recuperados, errores, saltados)
+- **Información de Runtime:** Muestra qué runtime se está usando y cuáles están disponibles
+- **Logs Informativos:** Proporciona información detallada del proceso de recuperación
+
+### ✅ **Métodos Multi-Runtime**
+- **Nuevo Método Docker:** `GetRunningContainers()` para listar contenedores ejecutándose
+- **Nuevo Método Containerd:** `GetRunningContainers()` para listar contenedores containerd
+- **Integración Completa:** Integrado con el sistema de recuperación automática
+- **Eficiencia:** Optimizado para búsqueda rápida de contenedores en ambos runtimes
+
+### ✅ **Funciones de Soporte**
+- **updateAppStatus():** Actualización segura de estados de aplicaciones
+- **recreateContainer():** Recreación de contenedores con variables de entorno
+- **DecryptValue():** Función pública para descifrado de valores secretos
+- **Detección de Runtime:** Sistema automático para determinar runtime preferido
+
+### 🔧 **Mejoras Técnicas**
+- **Manejo de Errores Robusto:** Rollback automático en caso de fallos
+- **Logs Detallados:** Sistema de logging mejorado para debugging
+- **Consistencia de Datos:** Verificación y actualización atómica de estados
+- **Seguridad:** Manejo seguro de variables secretas durante recuperación
+- **Multi-Runtime:** Soporte completo para Docker y containerd
+- **Fallback Automático:** Cambio automático entre runtimes si es necesario
+
+### 📊 **Beneficios del Usuario**
+1. **🔄 Persistencia:** Los contenedores sobreviven reinicios del servidor
+2. **⚡ Recuperación Automática:** No requiere intervención manual
+3. **🛠️ Control Manual:** Endpoint para recuperación manual cuando sea necesario
+4. **📊 Visibilidad:** Logs detallados del proceso de recuperación
+5. **🔒 Seguridad:** Manejo seguro de variables secretas
+6. **🎯 Precisión:** Verificación de estado real de contenedores
+7. **🔧 Multi-Runtime:** Soporte para Docker y containerd
+8. **🤖 Automático:** Detección automática del runtime preferido
+
+---
+
 ## [1.0.0] - 2024-07-08
 
 ### 🎉 **Lanzamiento Inicial**

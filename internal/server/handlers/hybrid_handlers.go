@@ -328,9 +328,9 @@ func HybridDockerStatusHandler(ctx *HybridContext, w http.ResponseWriter, r *htt
 func getSupportedImages(runtimeType runtimePkg.RuntimeType) []string {
 	switch runtimeType {
 	case runtimePkg.RuntimeTypeDocker:
-		return []string{"golang:1.24-alpine", "node:22-alpine", "python:3.13-alpine", "rust:1.83-alpine", "ubuntu:24.04", "nginx:alpine"}
+		return []string{"golang:1.24", "node:22", "python:3.13", "rust:1.83", "ubuntu:24.04", "nginx:alpine"}
 	case runtimePkg.RuntimeTypeContainerd:
-		return []string{"golang:1.24-alpine", "node:22-alpine", "python:3.13-alpine", "rust:1.83-alpine", "ubuntu:24.04"}
+		return []string{"golang:1.24", "node:22", "python:3.13", "rust:1.83", "ubuntu:24.04"}
 	// LXC removido - usar solo Docker y containerd
 	default:
 		return []string{}
@@ -1494,13 +1494,13 @@ func sendUnifiedRuntimeEvent(ctx *HybridContext, appID string, event runtimePkg.
 func getContainerdBaseImage(language string) string {
 	switch language {
 	case "go":
-		return "docker.io/library/golang:1.24-alpine"
+		return "docker.io/library/golang:1.24"
 	case "javascript", "node":
-		return "docker.io/library/node:22-alpine"
+		return "docker.io/library/node:22"
 	case "python":
-		return "docker.io/library/python:3.13-alpine"
+		return "docker.io/library/python:3.13"
 	case "rust":
-		return "docker.io/library/rust:1.83-alpine"
+		return "docker.io/library/rust:1.83"
 	default:
 		return "docker.io/library/ubuntu:24.04"
 	}
